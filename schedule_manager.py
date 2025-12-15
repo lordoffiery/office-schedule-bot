@@ -288,27 +288,10 @@ class ScheduleManager:
         # Пробуем сохранить в Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
-                # Сохраняем все дни недели для этой даты (не только измененный день)
-                # Загружаем полное расписание для этой даты
-                full_schedule = self.load_schedule_for_date(date, employee_manager)
-                # Обновляем измененный день
-                full_schedule[day_name] = employees
-                
-                # Получаем все дни недели для этой даты
-                week_dates = self.get_week_dates(self.get_week_start(date))
-                
-                # Формируем строки для всех дней недели
-                rows_to_save = []
-                for d, day_n in week_dates:
-                    if d.date() == date.date():
-                        # Это измененный день - используем обновленные данные
-                        employees_for_day = employees
-                    else:
-                        # Для других дней используем данные из full_schedule
-                        employees_for_day = full_schedule.get(day_n, [])
-                    
-                    employees_str = ', '.join(employees_for_day)
-                    rows_to_save.append([date_str, day_n, employees_str])
+                print(f"🔵 Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
+                # Сохраняем только измененный день (как в файле)
+                employees_str = ', '.join(employees)
+                row = [date_str, day_name, employees_str]
                 
                 # Обновляем записи в Google Sheets
                 worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
@@ -318,20 +301,37 @@ class ScheduleManager:
                     start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
                     rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
                     
-                    # Оставляем только записи не для этой даты
-                    for row in all_rows[start_idx:]:
-                        if len(row) >= 1 and row[0] != date_str:
-                            rows_to_keep.append(row)
+                    # Если заголовка нет, добавляем его
+                    if not rows_to_keep:
+                        rows_to_keep = [['date', 'day_name', 'employees']]
                     
-                    # Добавляем обновленные записи для этой даты
-                    rows_to_keep.extend(rows_to_save)
+                    # Оставляем только записи не для этой даты и дня
+                    found = False
+                    for row_data in all_rows[start_idx:]:
+                        if len(row_data) >= 2 and row_data[0] == date_str and row_data[1] == day_name:
+                            # Это запись для этой даты и дня - заменяем её
+                            found = True
+                            rows_to_keep.append(row)
+                        elif len(row_data) >= 1 and row_data[0] != date_str:
+                            # Запись для другой даты - оставляем
+                            rows_to_keep.append(row_data)
+                    
+                    # Если не нашли существующую запись, добавляем новую
+                    if not found:
+                        rows_to_keep.append(row)
                     
                     # Перезаписываем весь лист
+                    print(f"🔵 Сохраняю {len(rows_to_keep)} строк в Google Sheets")
                     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
+                    print(f"✅ Расписание сохранено в Google Sheets")
+                else:
+                    print(f"⚠️ Не удалось получить лист {SHEET_SCHEDULES}")
             except Exception as e:
-                print(f"Ошибка сохранения расписания в Google Sheets: {e}")
+                print(f"❌ Ошибка сохранения расписания в Google Sheets: {e}")
                 import traceback
                 traceback.print_exc()
+        else:
+            print(f"⚠️ Google Sheets не доступен (sheets_manager={self.sheets_manager}, is_available={self.sheets_manager.is_available() if self.sheets_manager else False})")
         
         # Сохраняем в файл
         with open(schedule_file, 'w', encoding='utf-8') as f:
