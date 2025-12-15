@@ -578,6 +578,26 @@ class ScheduleManager:
         # Пробуем сохранить в Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
+                # Проверяем, есть ли заголовок, если нет - добавляем
+                worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
+                if worksheet:
+                    all_rows = worksheet.get_all_values()
+                    # Фильтруем пустые строки
+                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    
+                    # Проверяем, есть ли заголовок
+                    has_header = False
+                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
+                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
+                        if first_cell in ['week_start', 'week', 'Неделя', 'week_start', 'employee_name']:
+                            has_header = True
+                    
+                    # Если заголовка нет, добавляем его
+                    if not has_header:
+                        header = ['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']
+                        self.sheets_manager.write_rows(SHEET_REQUESTS, [header], clear_first=True)
+                        logger.info(f"Добавлен заголовок в лист {SHEET_REQUESTS}")
+                
                 # Формируем строку для таблицы: [week_start, employee_name, telegram_id, days_requested, days_skipped]
                 row = [week_str, employee_name, str(telegram_id), days_req_str, days_skip_str]
                 self.sheets_manager.append_row(SHEET_REQUESTS, row)
@@ -601,7 +621,7 @@ class ScheduleManager:
                 # Фильтруем пустые строки
                 rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
                 # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['week_start', 'week', 'Неделя'] else 0
+                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['week_start', 'week', 'Неделя', 'employee_name'] else 0
                 for row in rows[start_idx:]:
                     if len(row) < 5 or not row[0] or row[0] != week_str:
                         continue
@@ -707,16 +727,21 @@ class ScheduleManager:
                     start_idx = 0
                     if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
                         first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['week_start', 'week', 'Неделя']:
+                        if first_cell in ['week_start', 'week', 'Неделя', 'employee_name']:
                             start_idx = 1
                             rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
                         else:
                             rows_to_keep = []
                     else:
                         rows_to_keep = []
+                    
+                    # Если заголовка нет, добавляем его
+                    if not rows_to_keep:
+                        rows_to_keep = [['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']]
+                    
                     # Оставляем только записи не для этой недели
                     for row in all_rows[start_idx:]:
-                        if len(row) >= 1 and row[0] != week_str:
+                        if len(row) >= 1 and row[0] and row[0].strip() != week_str:
                             rows_to_keep.append(row)
                     # Перезаписываем весь лист
                     self.sheets_manager.write_rows(SHEET_REQUESTS, rows_to_keep, clear_first=True)
