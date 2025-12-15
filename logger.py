@@ -1,18 +1,12 @@
 """
 Модуль для логирования команд бота
+Логи пишутся только в Google Sheets, чтобы не занимать место в памяти Railway
 """
-import os
 import logging
 from datetime import datetime
-from config import DATA_DIR, TIMEZONE, USE_GOOGLE_SHEETS, SHEET_LOGS
+from config import TIMEZONE, USE_GOOGLE_SHEETS, SHEET_LOGS
 import pytz
 
-# Создаем директорию для логов
-LOGS_DIR = f'{DATA_DIR}/logs'
-os.makedirs(LOGS_DIR, exist_ok=True)
-
-# Настройка логирования
-log_file = os.path.join(LOGS_DIR, 'bot.log')
 timezone = pytz.timezone(TIMEZONE)
 
 # Импортируем Google Sheets Manager только если нужно
@@ -24,23 +18,12 @@ if USE_GOOGLE_SHEETS:
     except ImportError:
         pass
     except Exception as e:
-        logger.warning(f"Не удалось инициализировать Google Sheets для логов: {e}")
+        # Используем стандартный logger для ошибок инициализации
+        logging.warning(f"Не удалось инициализировать Google Sheets для логов: {e}")
 
-# Настраиваем форматтер
-formatter = logging.Formatter(
-    '%(asctime)s | %(levelname)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-
-# Создаем handler для файла
-file_handler = logging.FileHandler(log_file, encoding='utf-8')
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(formatter)
-
-# Создаем logger
+# Создаем logger (без файлового handler, чтобы не занимать место)
 logger = logging.getLogger('bot_logger')
 logger.setLevel(logging.INFO)
-logger.addHandler(file_handler)
 
 
 def log_command(user_id: int, username: str, first_name: str, command: str, response: str):
@@ -71,10 +54,7 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
     
     log_message = f"{user_info} | Команда: {command} | Ответ: {response_short}"
     
-    # Логируем в файл
-    logger.info(log_message)
-    
-    # Также логируем в Google Sheets, если доступно
+    # Логируем только в Google Sheets (не в файл, чтобы не занимать место в памяти Railway)
     if sheets_manager and sheets_manager.is_available():
         try:
             # Формируем строку для таблицы: [timestamp, user_id, username, first_name, command, response]
@@ -90,5 +70,9 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
             sheets_manager.append_row(SHEET_LOGS, row)
         except Exception as e:
             # Не прерываем работу, если не удалось записать в Google Sheets
-            logger.warning(f"Ошибка записи лога в Google Sheets: {e}")
+            # Используем стандартный logger для ошибок
+            logging.warning(f"Ошибка записи лога в Google Sheets: {e}")
+    else:
+        # Если Google Sheets недоступен, используем стандартный logger (но не файл)
+        logger.info(log_message)
 
