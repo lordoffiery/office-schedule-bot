@@ -495,8 +495,11 @@ class ScheduleManager:
                             })
                         except (ValueError, IndexError):
                             continue
-                # Если загрузили из Google Sheets, возвращаем результат
-                if queue or not os.path.exists(os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")):
+                # Если загрузили из Google Sheets (даже если очередь пуста), возвращаем результат
+                # Проверяем, есть ли вообще записи для этой даты в Google Sheets
+                # Если есть хотя бы одна запись (даже не для этой даты), значит Google Sheets используется
+                if rows and len(rows) > start_idx:
+                    # В Google Sheets есть данные, возвращаем очередь (даже если пуста для этой даты)
                     return queue
             except Exception as e:
                 logger.warning(f"Ошибка загрузки очереди из Google Sheets: {e}, используем файлы")
@@ -727,8 +730,11 @@ class ScheduleManager:
                             }
                     except (ValueError, IndexError):
                         continue
-                # Если загрузили из Google Sheets, возвращаем результат
-                if requests_dict:
+                # Если загрузили из Google Sheets (даже если заявок нет для этой недели), возвращаем результат
+                # Проверяем, есть ли вообще записи в Google Sheets
+                # Если есть хотя бы одна запись (даже не для этой недели), значит Google Sheets используется
+                if rows and len(rows) > start_idx:
+                    # В Google Sheets есть данные, возвращаем заявки (даже если пусто для этой недели)
                     return list(requests_dict.values())
             except Exception as e:
                 logger.warning(f"Ошибка загрузки заявок из Google Sheets: {e}, используем файлы")
