@@ -126,10 +126,12 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                # Фильтруем пустые строки
+                rows = [row for row in rows if row and any(cell.strip() for cell in row)]
                 # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['date', 'date_str', 'Дата'] else 0
                 for row in rows[start_idx:]:
-                    if len(row) >= 3 and row[0] == date_str:
+                    if len(row) >= 3 and row[0] and row[0].strip() == date_str:
                         try:
                             day_name = row[1].strip()
                             employees_str = row[2].strip() if row[2] else ""
@@ -215,13 +217,27 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                    # Фильтруем пустые строки
+                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    
                     # Получаем даты недели
                     week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
+                    
+                    # Пропускаем заголовок, если есть
+                    start_idx = 0
+                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
+                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
+                        if first_cell in ['date', 'date_str', 'Дата']:
+                            start_idx = 1
+                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
+                        else:
+                            rows_to_keep = []
+                    else:
+                        rows_to_keep = []
+                    
                     # Оставляем только записи не для этой недели
-                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []
                     for row in all_rows[start_idx:]:
-                        if len(row) >= 1 and row[0] not in week_dates_str:
+                        if len(row) >= 1 and row[0] and row[0].strip() not in week_dates_str:
                             rows_to_keep.append(row)
                     # Добавляем новые записи для этой недели
                     rows_to_keep.extend(rows_to_save)
@@ -301,9 +317,20 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    # Пропускаем заголовок
-                    start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
-                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
+                    # Фильтруем пустые строки
+                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    
+                    # Пропускаем заголовок, если есть
+                    start_idx = 0
+                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
+                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
+                        if first_cell in ['date', 'date_str', 'Дата']:
+                            start_idx = 1
+                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
+                        else:
+                            rows_to_keep = []
+                    else:
+                        rows_to_keep = []
                     
                     # Если заголовка нет, добавляем его
                     if not rows_to_keep:
@@ -312,7 +339,7 @@ class ScheduleManager:
                     # Оставляем только записи не для этой даты и дня
                     found = False
                     for row_data in all_rows[start_idx:]:
-                        if len(row_data) >= 2 and row_data[0] == date_str and row_data[1] == day_name:
+                        if len(row_data) >= 2 and row_data[0] and row_data[0].strip() == date_str and row_data[1] and row_data[1].strip() == day_name:
                             # Это запись для этой даты и дня - заменяем её
                             found = True
                             logger.info(f"Найдена существующая запись для {date_str} {day_name}, заменяю")
