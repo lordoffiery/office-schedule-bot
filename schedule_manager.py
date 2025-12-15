@@ -315,6 +315,7 @@ class ScheduleManager:
                         if len(row_data) >= 2 and row_data[0] == date_str and row_data[1] == day_name:
                             # Это запись для этой даты и дня - заменяем её
                             found = True
+                            logger.info(f"Найдена существующая запись для {date_str} {day_name}, заменяю")
                             rows_to_keep.append(row)
                         elif len(row_data) >= 1 and row_data[0] != date_str:
                             # Запись для другой даты - оставляем
@@ -322,12 +323,14 @@ class ScheduleManager:
                     
                     # Если не нашли существующую запись, добавляем новую
                     if not found:
+                        logger.info(f"Не найдена существующая запись для {date_str} {day_name}, добавляю новую")
                         rows_to_keep.append(row)
                     
                     # Перезаписываем весь лист
-                    logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets")
+                    logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets (включая заголовок)")
+                    logger.info(f"Данные для сохранения: date={date_str}, day={day_name}, employees={employees_str[:100]}")
                     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
-                    logger.info(f"Расписание сохранено в Google Sheets")
+                    logger.info(f"✅ Расписание успешно сохранено в Google Sheets для {date_str}")
                 else:
                     logger.warning(f"Не удалось получить лист {SHEET_SCHEDULES}")
             except Exception as e:
