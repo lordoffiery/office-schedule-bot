@@ -25,9 +25,11 @@ SCHEDULE_SEND_MINUTE = 0
 DATA_DIR = 'data'
 SCHEDULES_DIR = f'{DATA_DIR}/schedules'
 REQUESTS_DIR = f'{DATA_DIR}/requests'
+QUEUE_DIR = f'{DATA_DIR}/queue'
 EMPLOYEES_FILE = f'{DATA_DIR}/employees.txt'
 ADMINS_FILE = f'{DATA_DIR}/admins.txt'
 DEFAULT_SCHEDULE_FILE = f'{DATA_DIR}/default_schedule.txt'
+PENDING_EMPLOYEES_FILE = f'{DATA_DIR}/pending_employees.txt'
 
 # Максимальное количество мест в офисе
 MAX_OFFICE_SEATS = 8

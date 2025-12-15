@@ -2,6 +2,7 @@
 Основной файл Telegram-бота для управления расписанием сотрудников
 """
 import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import Optional
 from aiogram import Bot, Dispatcher
@@ -11,7 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from config import API_TOKEN, ADMIN_IDS, WEEKDAYS_RU, TIMEZONE
+from config import API_TOKEN, ADMIN_IDS, WEEKDAYS_RU, TIMEZONE, MAX_OFFICE_SEATS, SCHEDULES_DIR
 from employee_manager import EmployeeManager
 from schedule_manager import ScheduleManager
 from notification_manager import NotificationManager
@@ -27,7 +28,7 @@ dp = Dispatcher(storage=storage)
 # Менеджеры
 admin_manager = AdminManager()
 employee_manager = EmployeeManager()
-schedule_manager = ScheduleManager()
+schedule_manager = ScheduleManager(employee_manager)
 notification_manager = NotificationManager(bot, schedule_manager, employee_manager)
 
 timezone = pytz.timezone(TIMEZONE)
@@ -98,8 +99,11 @@ async def cmd_start(message: Message):
     user_name = message.from_user.first_name or "Пользователь"
     
     # Регистрируем пользователя, если его еще нет
-    if not employee_manager.is_registered(user_id):
-        employee_manager.register_user(user_id, user_name)
+    username = message.from_user.username
+    was_registered = employee_manager.is_registered(user_id)
+    employee_manager.register_user(user_id, user_name, username)
+    
+    if not was_registered:
         await message.reply(
             f"Привет, {user_name}! Я бот для управления расписанием сотрудников.\n\n"
             "Используйте /help для списка команд."
@@ -111,26 +115,46 @@ async def cmd_start(message: Message):
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     """Команда /help"""
+    user_id = message.from_user.id
+    is_admin = admin_manager.is_admin(user_id)
+    
     help_text = (
         "📋 Доступные команды:\n\n"
-        "/set_week_days [дни] - Указать дни на следующую неделю\n"
-        "   Пример: /set_week_days пн вт чт\n\n"
-        "/my_schedule - Показать свое расписание на следующую неделю\n\n"
-        "/skip_day [дата] - Пропустить день\n"
-        "   Пример: /skip_day 2024-12-20\n\n"
-        "/add_day [дата] - Запросить дополнительный день\n"
-        "   Пример: /add_day 2024-12-20\n\n"
-        "/full_schedule [дата] - Полное расписание на дату (только админы)\n\n"
-        "/admin_add_employee [имя] @username - Добавить сотрудника (только админы)\n\n"
-        "/admin_add_admin @username - Добавить администратора (только админы)\n\n"
-        "/admin_list_admins - Список администраторов (только админы)"
+        "📅 Управление расписанием:\n"
+        "/set_week_days [даты] - Указать дни на следующую неделю\n"
+        "   Пример: /set_week_days 2024-12-23 2024-12-24 2024-12-26\n"
+        "   Также можно: /set_week_days пн вт чт\n\n"
+        "/my_schedule - Показать свое расписание на текущую неделю\n\n"
+        "/skip_day [дата] - Пропустить день (можно указать несколько дат)\n"
+        "   Пример: /skip_day 2024-12-20\n"
+        "   Пример: /skip_day 2024-12-20 2024-12-21\n\n"
+        "/add_day [дата] - Запросить дополнительный день (можно указать несколько дат)\n"
+        "   Пример: /add_day 2024-12-20\n"
+        "   Пример: /add_day 2024-12-20 2024-12-21\n\n"
     )
+    
+    if is_admin:
+        help_text += (
+            "\n👑 Админские команды:\n"
+            "/full_schedule [дата] - Полное расписание на дату\n\n"
+            "/admin_add_employee [имя] @username - Добавить сотрудника\n\n"
+            "/admin_add_admin @username - Добавить администратора\n\n"
+            "/admin_list_admins - Список администраторов\n\n"
+            "/admin_test_schedule - Тестовая рассылка расписания\n\n"
+            "/admin_skip_day @username [дата] - Пропустить день для сотрудника\n"
+            "   Пример: /admin_skip_day @username 2024-12-20\n"
+            "   Пример: /admin_skip_day @username 2024-12-20 2024-12-21\n\n"
+            "/admin_add_day @username [дата] - Добавить день для сотрудника\n"
+            "   Пример: /admin_add_day @username 2024-12-20\n"
+            "   Пример: /admin_add_day @username 2024-12-20 2024-12-21"
+        )
+    
     await message.reply(help_text)
 
 
 @dp.message(Command("set_week_days"))
 async def cmd_set_week_days(message: Message, state: FSMContext):
-    """Команда для установки дней на следующую неделю"""
+    """Команда для установки дней на следующую неделю (поддерживает даты и названия дней)"""
     user_id = message.from_user.id
     
     if not employee_manager.is_registered(user_id):
@@ -142,82 +166,470 @@ async def cmd_set_week_days(message: Message, state: FSMContext):
         await message.reply("Ошибка: не найдено ваше имя в системе")
         return
     
-    # Парсим дни из команды
-    command_parts = message.text.split(maxsplit=1)
-    if len(command_parts) > 1:
-        days_text = command_parts[1]
-        days = parse_weekdays(days_text)
-        
-        if not days:
-            await message.reply(
-                "Не удалось распознать дни. Используйте формат:\n"
-                "/set_week_days пн вт чт\n"
-                "или: /set_week_days понедельник вторник четверг"
-            )
-            return
-        
-        # Получаем начало следующей недели
-        now = datetime.now(timezone)
-        next_week_start = schedule_manager.get_week_start(now + timedelta(days=7))
-        
-        # Определяем, какие дни нужно пропустить (если есть в расписании по умолчанию)
-        default_schedule = schedule_manager.load_default_schedule()
-        days_to_skip = []
-        days_to_request = []
-        
-        week_days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
-        for day in week_days:
-            if day in default_schedule and employee_name in default_schedule[day]:
-                # Есть в расписании по умолчанию
-                if day not in days:
-                    days_to_skip.append(day)
-                else:
-                    days_to_request.append(day)
-            else:
-                # Нет в расписании по умолчанию
-                if day in days:
-                    days_to_request.append(day)
-        
-        # Сохраняем заявку
-        schedule_manager.save_request(
-            employee_name, user_id, next_week_start,
-            days_to_request, days_to_skip
-        )
-        
-        await message.reply(
-            f"✅ Ваши дни на следующую неделю сохранены:\n"
-            f"В офисе: {', '.join([day_to_short(d) for d in days])}\n\n"
-            f"Финальное расписание будет отправлено в воскресенье вечером."
-        )
-    else:
+    # Парсим аргументы из команды
+    command_parts = message.text.split()
+    if len(command_parts) < 2:
         await message.reply(
             "Укажите дни недели. Например:\n"
-            "/set_week_days пн вт чт"
+            "/set_week_days 2024-12-23 2024-12-24 2024-12-26\n"
+            "или: /set_week_days пн вт чт"
         )
-
-
-@dp.message(Command("my_schedule"))
-async def cmd_my_schedule(message: Message):
-    """Показать расписание сотрудника"""
-    user_id = message.from_user.id
-    
-    if not employee_manager.is_registered(user_id):
-        await message.reply("Вы не зарегистрированы. Используйте /start")
-        return
-    
-    employee_name = employee_manager.get_employee_name(user_id)
-    if not employee_name:
-        await message.reply("Ошибка: не найдено ваше имя в системе")
         return
     
     # Получаем начало следующей недели
     now = datetime.now(timezone)
     next_week_start = schedule_manager.get_week_start(now + timedelta(days=7))
+    week_dates = schedule_manager.get_week_dates(next_week_start)
     
-    # Загружаем расписание
-    employee_schedule = schedule_manager.get_employee_schedule(next_week_start, employee_name)
+    # Пытаемся распарсить как даты
+    days = []
+    dates_parsed = False
     
-    message_text = format_schedule_message(employee_schedule, next_week_start)
+    for arg in command_parts[1:]:
+        try:
+            # Пытаемся распарсить как дату
+            date = datetime.strptime(arg, "%Y-%m-%d")
+            date = timezone.localize(date)
+            
+            # Проверяем, что дата относится к следующей неделе
+            if schedule_manager.get_week_start(date) == next_week_start:
+                # Определяем день недели для этой даты
+                for d, day_n in week_dates:
+                    if d.date() == date.date():
+                        if day_n not in days:
+                            days.append(day_n)
+                        dates_parsed = True
+                        break
+        except ValueError:
+            # Не дата, пытаемся распарсить как название дня
+            pass
+    
+    # Если не удалось распарсить как даты, пытаемся как названия дней
+    if not dates_parsed:
+        days_text = ' '.join(command_parts[1:])
+        days = parse_weekdays(days_text)
+        
+        if not days:
+            await message.reply(
+                "Не удалось распознать дни. Используйте формат:\n"
+                "/set_week_days 2024-12-23 2024-12-24 2024-12-26\n"
+                "или: /set_week_days пн вт чт\n"
+                "или: /set_week_days понедельник вторник четверг"
+            )
+            return
+    
+    # Определяем, какие дни нужно пропустить (если есть в расписании по умолчанию)
+    default_schedule = schedule_manager.load_default_schedule()
+    days_to_skip = []
+    days_to_request = []
+    guaranteed_days = []  # Дни из расписания по умолчанию, которые указаны в команде
+    additional_days = []  # Дни, которых нет в расписании по умолчанию, но указаны в команде
+    
+    week_days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
+    for day in week_days:
+        if day in default_schedule:
+            # Проверяем, есть ли сотрудник в списке (может быть отформатированным)
+            employee_in_schedule = False
+            for emp in default_schedule[day]:
+                plain_name = schedule_manager.get_plain_name_from_formatted(emp)
+                if plain_name == employee_name:
+                    employee_in_schedule = True
+                    break
+            
+            if employee_in_schedule:
+                # Есть в расписании по умолчанию
+                if day not in days:
+                    days_to_skip.append(day)
+                else:
+                    days_to_request.append(day)
+                    guaranteed_days.append(day)
+            else:
+                # Нет в расписании по умолчанию
+                if day in days:
+                    days_to_request.append(day)
+                    additional_days.append(day)
+        else:
+            # Дня нет в расписании по умолчанию
+            if day in days:
+                days_to_request.append(day)
+                additional_days.append(day)
+    
+    # Загружаем существующие заявки и удаляем старую заявку пользователя
+    requests = schedule_manager.load_requests_for_week(next_week_start)
+    
+    # Очищаем файл заявок и пересохраняем все, кроме заявки текущего пользователя
+    schedule_manager.clear_requests_for_week(next_week_start)
+    for req in requests:
+        if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
+            schedule_manager.save_request(
+                req['employee_name'], req['telegram_id'], next_week_start,
+                req['days_requested'], req['days_skipped']
+            )
+    
+    # Сохраняем новую заявку пользователя (перезаписываем старую)
+    schedule_manager.save_request(
+        employee_name, user_id, next_week_start,
+        days_to_request, days_to_skip
+    )
+    
+    # Формируем сообщение
+    message_text = f"✅ Ваши дни на следующую неделю сохранены:\n\n"
+    
+    if guaranteed_days:
+        guaranteed_days_short = [day_to_short(d) for d in guaranteed_days]
+        message_text += f"✅ Гарантированные дни: {', '.join(guaranteed_days_short)}\n"
+    
+    if additional_days:
+        additional_days_short = [day_to_short(d) for d in additional_days]
+        message_text += f"📝 Дополнительно запрошены: {', '.join(additional_days_short)}\n"
+    
+    if days_to_skip:
+        skipped_days_short = [day_to_short(d) for d in days_to_skip]
+        message_text += f"⏭️ Пропущены: {', '.join(skipped_days_short)}\n"
+    
+    message_text += f"\nФинальное расписание будет отправлено в воскресенье вечером."
+    
+    await message.reply(message_text)
+
+
+@dp.message(Command("my_schedule"))
+async def cmd_my_schedule(message: Message):
+    """Показать расписание сотрудника на текущую неделю"""
+    user_id = message.from_user.id
+    
+    if not employee_manager.is_registered(user_id):
+        await message.reply("Вы не зарегистрированы. Используйте /start")
+        return
+    
+    employee_name = employee_manager.get_employee_name(user_id)
+    if not employee_name:
+        await message.reply("Ошибка: не найдено ваше имя в системе")
+        return
+    
+    # Получаем начало текущей недели
+    now = datetime.now(timezone)
+    current_week_start = schedule_manager.get_week_start(now)
+    
+    # Проверяем, есть ли уже сохраненные расписания для текущей недели
+    # (если они были созданы через /skip_day или /add_day)
+    week_dates = schedule_manager.get_week_dates(current_week_start)
+    has_saved_schedules = False
+    for date, day_name in week_dates:
+        date_str = date.strftime('%Y-%m-%d')
+        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+        if os.path.exists(schedule_file):
+            has_saved_schedules = True
+            break
+    
+    if has_saved_schedules:
+        # Используем сохраненные расписания
+        schedule = {}
+        for date, day_name in week_dates:
+            day_schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
+            schedule[day_name] = day_schedule.get(day_name, [])
+    else:
+        # Загружаем заявки на неделю и строим расписание с учетом заявок
+        requests = schedule_manager.load_requests_for_week(current_week_start)
+        schedule = schedule_manager.build_schedule_from_requests(current_week_start, requests, employee_manager)
+    
+    # Получаем расписание сотрудника из построенного расписания
+    employee_schedule = {}
+    formatted_name = employee_manager.format_employee_name(employee_name)
+    
+    for date, day_name in week_dates:
+        employees = schedule.get(day_name, [])
+        employee_schedule[day_name] = formatted_name in employees
+    
+    message_text = format_schedule_message(employee_schedule, current_week_start)
+    await message.reply(message_text)
+
+
+async def process_skip_day(date: datetime, employee_name: str, user_id: int, employee_manager, schedule_manager, notification_manager, bot, timezone):
+    """Обработать пропуск одного дня для сотрудника"""
+    now = datetime.now(timezone)
+    
+    # Проверяем, не прошел ли день
+    if date.date() < now.date():
+        return f"❌ Нельзя пропустить день {date.strftime('%d.%m.%Y')}, который уже прошел"
+    
+    # Получаем начало недели для указанной даты
+    week_start = schedule_manager.get_week_start(date)
+    current_week_start = schedule_manager.get_week_start(now)
+    
+    # Определяем день недели
+    week_dates = schedule_manager.get_week_dates(week_start)
+    day_name = None
+    for d, day_n in week_dates:
+        if d.date() == date.date():
+            day_name = day_n
+            break
+    
+    if not day_name:
+        return f"❌ Дата {date.strftime('%d.%m.%Y')} не является рабочим днем (Пн-Пт)"
+    
+    # Если это текущая неделя - обновляем сохраненное расписание
+    if week_start == current_week_start:
+        # Проверяем, находится ли пользователь в очереди
+        queue = schedule_manager.get_queue_for_date(date)
+        in_queue = any(
+            entry['employee_name'] == employee_name and entry['telegram_id'] == user_id
+            for entry in queue
+        )
+        
+        if in_queue:
+            # Пользователь в очереди - удаляем из очереди
+            schedule_manager.remove_from_queue(date, employee_name, user_id)
+            return f"✅ Удалены из очереди на {day_name} ({date.strftime('%d.%m.%Y')})"
+        else:
+            # Пользователь в расписании - удаляем из расписания
+            success, free_slots = schedule_manager.update_schedule_for_date(
+                date, employee_name, 'remove', employee_manager
+            )
+            
+            if success:
+                # Обрабатываем очередь - добавляем первого, если есть место
+                added_from_queue = schedule_manager.process_queue_for_date(date, employee_manager)
+                
+                if added_from_queue:
+                    # Уведомляем добавленного из очереди
+                    formatted_name = employee_manager.format_employee_name(added_from_queue['employee_name'])
+                    try:
+                        await bot.send_message(
+                            added_from_queue['telegram_id'],
+                            f"✅ Место освободилось!\n\n"
+                            f"📅 {day_to_short(day_name)} ({date.strftime('%d.%m.%Y')})\n"
+                            f"Вы автоматически добавлены в расписание."
+                        )
+                    except Exception as e:
+                        print(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
+                    
+                    # Обновляем количество свободных мест после добавления из очереди
+                    schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
+                    employees = schedule.get(day_name, [])
+                    free_slots = MAX_OFFICE_SEATS - len(employees)
+                
+                # Уведомляем других сотрудников о свободном месте (если оно еще есть)
+                if free_slots > 0:
+                    await notification_manager.notify_available_slot(date, day_name, free_slots)
+                
+                if added_from_queue:
+                    return f"✅ Удалены из расписания на {day_name} ({date.strftime('%d.%m.%Y')})\n💡 Место занято сотрудником из очереди. 🆓 Свободных мест: {free_slots}"
+                else:
+                    return f"✅ Удалены из расписания на {day_name} ({date.strftime('%d.%m.%Y')})\n💡 Освобождено место. Другие сотрудники получили уведомление."
+            else:
+                return f"❌ Ошибка при обновлении расписания на {date.strftime('%d.%m.%Y')}"
+    else:
+        # Это следующая неделя - работаем с заявками
+        # Загружаем существующие заявки
+        requests = schedule_manager.load_requests_for_week(week_start)
+        
+        # Ищем заявку сотрудника
+        user_request = None
+        for req in requests:
+            if req['employee_name'] == employee_name and req['telegram_id'] == user_id:
+                user_request = req
+                break
+        
+        # Если заявки нет, создаем новую
+        if not user_request:
+            days_requested = []
+            days_skipped = [day_name]
+        else:
+            # Обновляем существующую заявку
+            days_requested = user_request['days_requested'].copy()
+            days_skipped = user_request['days_skipped'].copy()
+            
+            if day_name not in days_skipped:
+                days_skipped.append(day_name)
+            # Удаляем из запрошенных, если был там
+            if day_name in days_requested:
+                days_requested.remove(day_name)
+        
+        # Очищаем старые заявки и пересохраняем все
+        schedule_manager.clear_requests_for_week(week_start)
+        for req in requests:
+            if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
+                schedule_manager.save_request(
+                    req['employee_name'], req['telegram_id'], week_start,
+                    req['days_requested'], req['days_skipped']
+                )
+        # Сохраняем обновленную заявку сотрудника
+        schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
+        
+        return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков на следующую неделю"
+
+
+@dp.message(Command("skip_day"))
+async def cmd_skip_day(message: Message):
+    """Пропустить день (можно указать несколько дат через пробел)"""
+    user_id = message.from_user.id
+    
+    if not employee_manager.is_registered(user_id):
+        await message.reply("Вы не зарегистрированы. Используйте /start")
+        return
+    
+    employee_name = employee_manager.get_employee_name(user_id)
+    if not employee_name:
+        await message.reply("Ошибка: не найдено ваше имя в системе")
+        return
+    
+    # Парсим даты из команды
+    command_parts = message.text.split()
+    if len(command_parts) < 2:
+        await message.reply("Укажите дату(ы). Например: /skip_day 2024-12-20 или /skip_day 2024-12-20 2024-12-21")
+        return
+    
+    # Парсим все даты
+    dates = []
+    for date_str in command_parts[1:]:
+        try:
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+            date = timezone.localize(date)
+            dates.append(date)
+        except ValueError:
+            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            return
+    
+    # Обрабатываем каждую дату
+    results = []
+    for date in dates:
+        result = await process_skip_day(date, employee_name, user_id, employee_manager, schedule_manager, notification_manager, bot, timezone)
+        results.append(result)
+    
+    # Формируем ответ
+    message_text = "\n\n".join(results)
+    await message.reply(message_text)
+
+
+async def process_add_day(date: datetime, employee_name: str, user_id: int, employee_manager, schedule_manager, timezone):
+    """Обработать добавление одного дня для сотрудника"""
+    now = datetime.now(timezone)
+    
+    # Проверяем, не прошел ли день
+    if date.date() < now.date():
+        return f"❌ Нельзя добавить день {date.strftime('%d.%m.%Y')}, который уже прошел"
+    
+    # Получаем начало недели для указанной даты
+    week_start = schedule_manager.get_week_start(date)
+    current_week_start = schedule_manager.get_week_start(now)
+    
+    # Определяем день недели
+    week_dates = schedule_manager.get_week_dates(week_start)
+    day_name = None
+    for d, day_n in week_dates:
+        if d.date() == date.date():
+            day_name = day_n
+            break
+    
+    if not day_name:
+        return f"❌ Дата {date.strftime('%d.%m.%Y')} не является рабочим днем (Пн-Пт)"
+    
+    # Если это текущая неделя - обновляем сохраненное расписание
+    if week_start == current_week_start:
+        success, free_slots = schedule_manager.update_schedule_for_date(
+            date, employee_name, 'add', employee_manager
+        )
+        
+        if success:
+            # Удаляем из очереди, если был там
+            schedule_manager.remove_from_queue(date, employee_name, user_id)
+            return f"✅ Добавлены в расписание на {day_name} ({date.strftime('%d.%m.%Y')})\n💡 Свободных мест осталось: {free_slots}"
+        else:
+            # Все места заняты - добавляем в очередь
+            added_to_queue = schedule_manager.add_to_queue(date, employee_name, user_id)
+            
+            if added_to_queue:
+                queue = schedule_manager.get_queue_for_date(date)
+                position = 1
+                # Находим позицию в очереди
+                for i, entry in enumerate(queue):
+                    if entry['employee_name'] == employee_name and entry['telegram_id'] == user_id:
+                        position = i + 1
+                        break
+                
+                return f"⏳ Все места заняты. Добавлены в очередь на {day_name} ({date.strftime('%d.%m.%Y')})\n📋 Позиция в очереди: {position}\n\nКогда место освободится, вы автоматически будете добавлены в расписание."
+            else:
+                return f"❌ Уже в очереди на {day_name} ({date.strftime('%d.%m.%Y')})"
+    else:
+        # Это следующая неделя - работаем с заявками
+        # Загружаем существующие заявки
+        requests = schedule_manager.load_requests_for_week(week_start)
+        
+        # Ищем заявку сотрудника
+        user_request = None
+        for req in requests:
+            if req['employee_name'] == employee_name and req['telegram_id'] == user_id:
+                user_request = req
+                break
+        
+        # Если заявки нет, создаем новую
+        if not user_request:
+            days_requested = [day_name]
+            days_skipped = []
+        else:
+            # Обновляем существующую заявку
+            days_requested = user_request['days_requested'].copy()
+            days_skipped = user_request['days_skipped'].copy()
+            
+            if day_name not in days_requested:
+                days_requested.append(day_name)
+            # Удаляем из пропусков, если был там
+            if day_name in days_skipped:
+                days_skipped.remove(day_name)
+        
+        # Очищаем старые заявки и пересохраняем все
+        schedule_manager.clear_requests_for_week(week_start)
+        for req in requests:
+            if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
+                schedule_manager.save_request(
+                    req['employee_name'], req['telegram_id'], week_start,
+                    req['days_requested'], req['days_skipped']
+                )
+        # Сохраняем обновленную заявку сотрудника
+        schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
+        
+        return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список запрошенных дней на следующую неделю"
+
+
+@dp.message(Command("add_day"))
+async def cmd_add_day(message: Message):
+    """Запросить дополнительный день (можно указать несколько дат через пробел)"""
+    user_id = message.from_user.id
+    
+    if not employee_manager.is_registered(user_id):
+        await message.reply("Вы не зарегистрированы. Используйте /start")
+        return
+    
+    employee_name = employee_manager.get_employee_name(user_id)
+    if not employee_name:
+        await message.reply("Ошибка: не найдено ваше имя в системе")
+        return
+    
+    # Парсим даты из команды
+    command_parts = message.text.split()
+    if len(command_parts) < 2:
+        await message.reply("Укажите дату(ы). Например: /add_day 2024-12-20 или /add_day 2024-12-20 2024-12-21")
+        return
+    
+    # Парсим все даты
+    dates = []
+    for date_str in command_parts[1:]:
+        try:
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+            date = timezone.localize(date)
+            dates.append(date)
+        except ValueError:
+            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            return
+    
+    # Обрабатываем каждую дату
+    results = []
+    for date in dates:
+        result = await process_add_day(date, employee_name, user_id, employee_manager, schedule_manager, timezone)
+        results.append(result)
+    
+    # Формируем ответ
+    message_text = "\n\n".join(results)
     await message.reply(message_text)
 
 
@@ -242,10 +654,33 @@ async def cmd_full_schedule(message: Message):
     else:
         date = datetime.now(timezone)
     
-    schedule = schedule_manager.load_schedule_for_date(date)
+    # Получаем начало недели для указанной даты
+    week_start = schedule_manager.get_week_start(date)
+    
+    # Проверяем, есть ли уже сохраненные расписания для этой недели
+    week_dates = schedule_manager.get_week_dates(week_start)
+    has_saved_schedules = False
+    for d, day_name in week_dates:
+        date_str = d.strftime('%Y-%m-%d')
+        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+        if os.path.exists(schedule_file):
+            has_saved_schedules = True
+            break
+    
+    if has_saved_schedules:
+        # Используем сохраненные расписания
+        schedule = {}
+        for d, day_name in week_dates:
+            day_schedule = schedule_manager.load_schedule_for_date(d, employee_manager)
+            schedule[day_name] = day_schedule.get(day_name, [])
+    else:
+        # Загружаем заявки на неделю и строим расписание с учетом заявок
+        requests = schedule_manager.load_requests_for_week(week_start)
+        schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
     
     message_text = f"📅 Расписание на {date.strftime('%d.%m.%Y')}:\n\n"
     for day, employees in schedule.items():
+        # Имена уже отформатированы
         message_text += f"{day}: {', '.join(employees)}\n"
     
     await message.reply(message_text)
@@ -278,9 +713,22 @@ async def cmd_admin_add_employee(message: Message):
                 username = entity.user.username or entity.user.first_name
                 break
     
-    # Парсим команду
-    command_parts = message.text.split(maxsplit=2)
+    # Парсим команду - ищем username в тексте (всегда начинается с @)
+    text = message.text
+    username_in_text = None
+    username_start = text.find('@')
     
+    if username_start != -1:
+        # Нашли @, извлекаем username
+        username_part = text[username_start:].split()[0]  # Берем первое слово после @
+        username_in_text = username_part.lstrip('@')
+        # Удаляем username из текста для извлечения имени
+        text_without_username = text[:username_start].strip()
+    else:
+        text_without_username = text
+    
+    # Извлекаем имя - всё после команды до username или до конца
+    command_parts = text_without_username.split(maxsplit=1)
     if len(command_parts) < 2:
         await message.reply(
             "Используйте один из форматов:\n\n"
@@ -289,39 +737,94 @@ async def cmd_admin_add_employee(message: Message):
             "2. Укажите username:\n"
             "   /admin_add_employee [имя] @username\n\n"
             "3. Укажите telegram_id (если знаете):\n"
-            "   /admin_add_employee [имя] [telegram_id]"
+            "   /admin_add_employee [имя] [telegram_id]\n\n"
+            "4. Укажите telegram_id и username:\n"
+            "   /admin_add_employee [имя] [telegram_id] @username"
         )
         return
     
-    name = command_parts[1]
+    name = command_parts[1].strip()
     
     # Если не нашли через reply или entities, пытаемся парсить из текста
     if not telegram_id:
-        if len(command_parts) >= 3:
-            username_or_id = command_parts[2].lstrip('@')
-            # Пытаемся понять, это ID или username
-            try:
-                telegram_id = int(username_or_id)
-            except ValueError:
-                # Это username - просим пользователя написать боту или ответить на его сообщение
-                username = username_or_id
-                await message.reply(
-                    f"Для добавления сотрудника {name} (@{username}) используйте один из способов:\n\n"
-                    f"1. Ответьте на любое сообщение от @{username} командой:\n"
-                    f"   /admin_add_employee {name}\n\n"
-                    f"2. Попросите @{username} написать боту /start, затем используйте команду снова"
-                )
-                return
-        else:
+        if username_in_text:
+            # Есть username в тексте
+            username = username_in_text
+            # Сохраняем отложенную запись для использования при /start
+            employee_manager.add_pending_employee(username, name)
             await message.reply(
-                "Укажите username или ответьте на сообщение пользователя:\n"
-                "/admin_add_employee [имя] @username"
+                f"✅ Отложенная запись для сотрудника {name} (@{username}) сохранена.\n\n"
+                f"Попросите @{username} написать боту /start - он будет автоматически добавлен с именем '{name}'."
             )
             return
+        else:
+            # Проверяем, может быть указан ID после имени
+            remaining_parts = text_without_username.split()
+            if len(remaining_parts) >= 3:
+                # Пытаемся понять, это ID или что-то еще
+                try:
+                    telegram_id = int(remaining_parts[2])
+                except (ValueError, IndexError):
+                    await message.reply(
+                        "Укажите username или ответьте на сообщение пользователя:\n"
+                        "/admin_add_employee [имя] @username"
+                    )
+                    return
+            else:
+                await message.reply(
+                    "Укажите username или ответьте на сообщение пользователя:\n"
+                    "/admin_add_employee [имя] @username"
+                )
+                return
     
     # Если у нас есть ID, добавляем сотрудника
     if telegram_id:
-        if employee_manager.add_employee(name, telegram_id):
+        # Получаем имя из Telegram, если есть reply
+        telegram_name = None
+        if message.reply_to_message and message.reply_to_message.from_user:
+            telegram_name = message.reply_to_message.from_user.first_name or name
+            # Если username не был получен ранее, берем из reply
+            if not username:
+                username = message.reply_to_message.from_user.username
+        
+        # Если имя из Telegram не получено, проверяем, зарегистрирован ли пользователь
+        if not telegram_name:
+            # Если пользователь уже зарегистрирован через /start, берем его имя из базы
+            employee_data = employee_manager.get_employee_data(telegram_id)
+            if employee_data:
+                _, telegram_name, existing_username = employee_data
+                # Сохраняем существующий username, если новый не указан
+                if not username:
+                    username = existing_username
+            else:
+                # Если не зарегистрирован, используем имя вручную как имя из Telegram
+                telegram_name = name
+        
+        # Если username не был получен, используем найденный в тексте
+        if not username and username_in_text:
+            username = username_in_text
+        
+        # Если username все еще не получен, берем из существующих данных сотрудника
+        if not username:
+            employee_data = employee_manager.get_employee_data(telegram_id)
+            if employee_data:
+                _, _, existing_username = employee_data
+                username = existing_username
+        
+        # Проверяем, есть ли отложенная запись для этого username, и используем имя из неё
+        if username:
+            pending_name = employee_manager.get_pending_employee(username)
+            if pending_name:
+                # Используем имя из отложенной записи, если оно было указано админом
+                name = pending_name
+                # Удаляем отложенную запись, так как пользователь теперь добавлен
+                employee_manager.remove_pending_employee(username)
+        
+        if employee_manager.add_employee(name, telegram_id, telegram_name, username):
+            # Обновляем имя в default_schedule.txt, если сотрудник там есть
+            formatted_name = employee_manager.format_employee_name_by_id(telegram_id)
+            schedule_manager.update_employee_name_in_default_schedule(name, formatted_name)
+            
             username_display = f" (@{username})" if username else ""
             await message.reply(
                 f"✅ Сотрудник {name}{username_display} добавлен\n"
@@ -372,20 +875,29 @@ async def cmd_admin_add_admin(message: Message):
             try:
                 telegram_id = int(username_or_id)
             except ValueError:
+                # Это username - ищем в employees.txt
                 username = username_or_id
-                await message.reply(
-                    f"Для добавления администратора @{username} используйте один из способов:\n\n"
-                    f"1. Ответьте на любое сообщение от @{username} командой:\n"
-                    f"   /admin_add_admin\n\n"
-                    f"2. Попросите @{username} написать боту /start, затем используйте команду снова"
-                )
-                return
+                found_id = employee_manager.get_telegram_id_by_username(username)
+                if found_id:
+                    telegram_id = found_id
+                else:
+                    await message.reply(
+                        f"❌ Пользователь @{username} не найден в списке сотрудников.\n\n"
+                        f"Сначала добавьте сотрудника командой:\n"
+                        f"/admin_add_employee [имя] @{username}\n\n"
+                        f"Или используйте один из способов:\n"
+                        f"1. Ответьте на сообщение пользователя командой:\n"
+                        f"   /admin_add_admin\n\n"
+                        f"2. Укажите telegram_id:\n"
+                        f"   /admin_add_admin [telegram_id]"
+                    )
+                    return
         else:
             await message.reply(
                 "Используйте один из форматов:\n\n"
                 "1. Ответьте на сообщение пользователя:\n"
                 "   /admin_add_admin\n\n"
-                "2. Укажите username:\n"
+                "2. Укажите username (никнейм в Telegram):\n"
                 "   /admin_add_admin @username\n\n"
                 "3. Укажите telegram_id:\n"
                 "   /admin_add_admin [telegram_id]"
@@ -426,8 +938,167 @@ async def cmd_admin_list_admins(message: Message):
     
     message_text = "👑 Список администраторов:\n\n"
     for admin_id in admins:
-        message_text += f"• {admin_id}\n"
+        # Получаем данные сотрудника для получения username
+        employee_data = employee_manager.get_employee_data(admin_id)
+        if employee_data:
+            _, _, username = employee_data
+            if username:
+                message_text += f"• {admin_id} (@{username})\n"
+            else:
+                message_text += f"• {admin_id}\n"
+        else:
+            message_text += f"• {admin_id}\n"
     
+    await message.reply(message_text)
+
+
+@dp.message(Command("admin_test_schedule"))
+async def cmd_admin_test_schedule(message: Message):
+    """Тестовая команда для отправки расписания (только для админов)"""
+    user_id = message.from_user.id
+    
+    if not admin_manager.is_admin(user_id):
+        await message.reply("Эта команда доступна только администраторам")
+        return
+    
+    await message.reply("📤 Начинаю рассылку расписания на следующую неделю...")
+    
+    try:
+        await notification_manager.send_weekly_schedule()
+        await message.reply("✅ Расписание успешно отправлено всем сотрудникам")
+    except Exception as e:
+        await message.reply(f"❌ Ошибка при отправке расписания: {e}")
+
+
+@dp.message(Command("admin_skip_day"))
+async def cmd_admin_skip_day(message: Message):
+    """Пропустить день для сотрудника (только для админов, можно указать несколько дат)"""
+    user_id = message.from_user.id
+    
+    if not admin_manager.is_admin(user_id):
+        await message.reply("Эта команда доступна только администраторам")
+        return
+    
+    # Парсим команду: /admin_skip_day @username date1 date2 ...
+    command_parts = message.text.split()
+    if len(command_parts) < 3:
+        await message.reply(
+            "Используйте формат:\n"
+            "/admin_skip_day @username 2024-12-20\n"
+            "или\n"
+            "/admin_skip_day @username 2024-12-20 2024-12-21"
+        )
+        return
+    
+    # Ищем username (начинается с @)
+    username = None
+    date_start_idx = 1
+    for i, part in enumerate(command_parts[1:], 1):
+        if part.startswith('@'):
+            username = part.lstrip('@')
+            date_start_idx = i + 1
+            break
+    
+    if not username:
+        await message.reply("Укажите username сотрудника (начинается с @). Например: /admin_skip_day @username 2024-12-20")
+        return
+    
+    # Находим telegram_id по username
+    target_telegram_id = employee_manager.get_telegram_id_by_username(username)
+    if not target_telegram_id:
+        await message.reply(f"❌ Сотрудник @{username} не найден в системе")
+        return
+    
+    target_employee_name = employee_manager.get_employee_name(target_telegram_id)
+    if not target_employee_name:
+        await message.reply(f"❌ Не найдено имя сотрудника @{username}")
+        return
+    
+    # Парсим даты
+    dates = []
+    for date_str in command_parts[date_start_idx:]:
+        try:
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+            date = timezone.localize(date)
+            dates.append(date)
+        except ValueError:
+            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            return
+    
+    # Обрабатываем каждую дату
+    results = []
+    for date in dates:
+        result = await process_skip_day(date, target_employee_name, target_telegram_id, employee_manager, schedule_manager, notification_manager, bot, timezone)
+        results.append(result)
+    
+    # Формируем ответ
+    message_text = f"👤 Сотрудник: @{username}\n\n" + "\n\n".join(results)
+    await message.reply(message_text)
+
+
+@dp.message(Command("admin_add_day"))
+async def cmd_admin_add_day(message: Message):
+    """Добавить день для сотрудника (только для админов, можно указать несколько дат)"""
+    user_id = message.from_user.id
+    
+    if not admin_manager.is_admin(user_id):
+        await message.reply("Эта команда доступна только администраторам")
+        return
+    
+    # Парсим команду: /admin_add_day @username date1 date2 ...
+    command_parts = message.text.split()
+    if len(command_parts) < 3:
+        await message.reply(
+            "Используйте формат:\n"
+            "/admin_add_day @username 2024-12-20\n"
+            "или\n"
+            "/admin_add_day @username 2024-12-20 2024-12-21"
+        )
+        return
+    
+    # Ищем username (начинается с @)
+    username = None
+    date_start_idx = 1
+    for i, part in enumerate(command_parts[1:], 1):
+        if part.startswith('@'):
+            username = part.lstrip('@')
+            date_start_idx = i + 1
+            break
+    
+    if not username:
+        await message.reply("Укажите username сотрудника (начинается с @). Например: /admin_add_day @username 2024-12-20")
+        return
+    
+    # Находим telegram_id по username
+    target_telegram_id = employee_manager.get_telegram_id_by_username(username)
+    if not target_telegram_id:
+        await message.reply(f"❌ Сотрудник @{username} не найден в системе")
+        return
+    
+    target_employee_name = employee_manager.get_employee_name(target_telegram_id)
+    if not target_employee_name:
+        await message.reply(f"❌ Не найдено имя сотрудника @{username}")
+        return
+    
+    # Парсим даты
+    dates = []
+    for date_str in command_parts[date_start_idx:]:
+        try:
+            date = datetime.strptime(date_str, "%Y-%m-%d")
+            date = timezone.localize(date)
+            dates.append(date)
+        except ValueError:
+            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            return
+    
+    # Обрабатываем каждую дату
+    results = []
+    for date in dates:
+        result = await process_add_day(date, target_employee_name, target_telegram_id, employee_manager, schedule_manager, timezone)
+        results.append(result)
+    
+    # Формируем ответ
+    message_text = f"👤 Сотрудник: @{username}\n\n" + "\n\n".join(results)
     await message.reply(message_text)
 
 
@@ -462,14 +1133,23 @@ async def handle_text_message(message: Message):
             
             week_days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
             for day in week_days:
-                if day in default_schedule and employee_name in default_schedule[day]:
-                    if day not in days:
-                        days_to_skip.append(day)
+                if day in default_schedule:
+                    # Проверяем, есть ли сотрудник в списке (может быть отформатированным)
+                    employee_in_schedule = False
+                    for emp in default_schedule[day]:
+                        plain_name = schedule_manager.get_plain_name_from_formatted(emp)
+                        if plain_name == employee_name:
+                            employee_in_schedule = True
+                            break
+                    
+                    if employee_in_schedule:
+                        if day not in days:
+                            days_to_skip.append(day)
+                        else:
+                            days_to_request.append(day)
                     else:
-                        days_to_request.append(day)
-                else:
-                    if day in days:
-                        days_to_request.append(day)
+                        if day in days:
+                            days_to_request.append(day)
             
             # Сохраняем заявку
             schedule_manager.save_request(
