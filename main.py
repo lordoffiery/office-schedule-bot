@@ -117,14 +117,25 @@ async def cmd_start(message: Message):
     
     # Регистрируем пользователя, если его еще нет
     was_registered = employee_manager.is_registered(user_id)
-    employee_manager.register_user(user_id, user_name, username)
+    was_new, was_added_by_admin = employee_manager.register_user(user_id, user_name, username)
     
-    if not was_registered:
+    if was_new and not was_added_by_admin:
+        # Пользователь сам себя зарегистрировал, не был добавлен админом
+        response = (
+            f"Привет, {user_name}!\n\n"
+            "Вы зарегистрированы в системе, но для полного доступа к функциям бота "
+            "необходимо, чтобы администратор добавил вас через команду /admin_add_employee.\n\n"
+            "Обратитесь к администратору для получения доступа.\n\n"
+            "Используйте /help для списка доступных команд."
+        )
+    elif was_new and was_added_by_admin:
+        # Пользователь был добавлен админом и только что зарегистрировался
         response = (
             f"Привет, {user_name}! Я бот для управления расписанием сотрудников.\n\n"
             "Используйте /help для списка команд."
         )
     else:
+        # Пользователь уже был зарегистрирован
         response = "Вы уже зарегистрированы! Используйте /help для списка команд."
     
     await message.reply(response)
@@ -186,6 +197,16 @@ async def cmd_set_week_days(message: Message, state: FSMContext):
     
     if not employee_manager.is_registered(user_id):
         response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", response)
+        return
+    
+    # Проверяем, был ли пользователь добавлен админом
+    if not employee_manager.was_added_by_admin(user_id):
+        response = (
+            "❌ Для использования этой команды необходимо, чтобы администратор добавил вас в систему.\n\n"
+            "Обратитесь к администратору для получения доступа."
+        )
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", response)
         return
@@ -336,6 +357,16 @@ async def cmd_my_schedule(message: Message):
     
     if not employee_manager.is_registered(user_id):
         response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", response)
+        return
+    
+    # Проверяем, был ли пользователь добавлен админом
+    if not employee_manager.was_added_by_admin(user_id):
+        response = (
+            "❌ Для использования этой команды необходимо, чтобы администратор добавил вас в систему.\n\n"
+            "Обратитесь к администратору для получения доступа."
+        )
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", response)
         return
@@ -513,6 +544,16 @@ async def cmd_skip_day(message: Message):
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", response)
         return
     
+    # Проверяем, был ли пользователь добавлен админом
+    if not employee_manager.was_added_by_admin(user_id):
+        response = (
+            "❌ Для использования этой команды необходимо, чтобы администратор добавил вас в систему.\n\n"
+            "Обратитесь к администратору для получения доступа."
+        )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", response)
+        return
+    
     employee_name = employee_manager.get_employee_name(user_id)
     if not employee_name:
         response = "Ошибка: не найдено ваше имя в системе"
@@ -651,6 +692,16 @@ async def cmd_add_day(message: Message):
     
     if not employee_manager.is_registered(user_id):
         response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", response)
+        return
+    
+    # Проверяем, был ли пользователь добавлен админом
+    if not employee_manager.was_added_by_admin(user_id):
+        response = (
+            "❌ Для использования этой команды необходимо, чтобы администратор добавил вас в систему.\n\n"
+            "Обратитесь к администратору для получения доступа."
+        )
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", response)
         return
@@ -1325,6 +1376,10 @@ async def handle_text_message(message: Message):
     
     if not employee_manager.is_registered(user_id):
         return
+    
+    # Проверяем, был ли пользователь добавлен админом
+    if not employee_manager.was_added_by_admin(user_id):
+        return  # Не обрабатываем текстовые сообщения от неодобренных пользователей
     
     # Если сообщение похоже на список дней недели
     text = message.text.lower()

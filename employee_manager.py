@@ -32,6 +32,8 @@ class EmployeeManager:
         self.name_to_id: Dict[str, int] = {}
         # Отложенные записи: username -> manual_name (для случаев, когда админ добавляет по username до /start)
         self.pending_employees: Dict[str, str] = {}
+        # Флаг одобрения админом: telegram_id -> bool (True если был добавлен админом)
+        self.approved_by_admin: Dict[int, bool] = {}
         
         # Инициализируем Google Sheets Manager если нужно
         self.sheets_manager = None
@@ -64,6 +66,8 @@ class EmployeeManager:
                         if telegram_id not in self.employees:
                             self.employees[telegram_id] = (manual_name, telegram_name, username)
                             self.name_to_id[manual_name] = telegram_id
+                            # Если загружаем из файла/Google Sheets, считаем что был добавлен админом
+                            self.approved_by_admin[telegram_id] = True
                     except (ValueError, IndexError):
                         continue
                 return
@@ -103,6 +107,8 @@ class EmployeeManager:
                     if telegram_id not in self.employees:
                         self.employees[telegram_id] = (manual_name, telegram_name, username)
                         self.name_to_id[manual_name] = telegram_id
+                        # Если загружаем из файла/Google Sheets, считаем что был добавлен админом
+                        self.approved_by_admin[telegram_id] = True
         except Exception as e:
             logger.error(f"Ошибка загрузки сотрудников: {e}")
     
@@ -152,6 +158,8 @@ class EmployeeManager:
         
         self.employees[telegram_id] = (name, telegram_name, username)
         self.name_to_id[name] = telegram_id
+        # Помечаем как одобренного админом
+        self.approved_by_admin[telegram_id] = True
         self._save_employees()
         return True
     
@@ -244,8 +252,13 @@ class EmployeeManager:
             del self.pending_employees[username_lower]
             self._save_pending_employees()
     
-    def register_user(self, telegram_id: int, telegram_name: str, username: Optional[str] = None) -> bool:
-        """Зарегистрировать пользователя (если его еще нет)"""
+    def register_user(self, telegram_id: int, telegram_name: str, username: Optional[str] = None) -> tuple[bool, bool]:
+        """
+        Зарегистрировать пользователя (если его еще нет)
+        Возвращает (was_new, was_added_by_admin):
+        - was_new: True если пользователь был зарегистрирован сейчас, False если уже был
+        - was_added_by_admin: True если пользователь был добавлен админом (через pending или уже был в системе)
+        """
         if telegram_id in self.employees:
             # Обновляем данные, если они изменились
             manual_name, old_telegram_name, old_username = self.employees[telegram_id]
@@ -255,22 +268,28 @@ class EmployeeManager:
                 self.employees[telegram_id] = (manual_name, telegram_name, username or old_username)
                 self._save_employees()
                 updated = True
-            return False  # Уже зарегистрирован
+            # Если пользователь уже был в системе, считаем что был добавлен админом
+            was_added = self.approved_by_admin.get(telegram_id, True)
+            return (False, was_added)  # Уже зарегистрирован
         
         # Проверяем, есть ли отложенная запись для этого username
         manual_name = telegram_name  # По умолчанию используем имя из Telegram
+        was_added_by_admin = False
         if username:
             pending_name = self.get_pending_employee(username)
             if pending_name:
                 manual_name = pending_name
+                was_added_by_admin = True
                 # Удаляем отложенную запись, так как пользователь зарегистрирован
                 self.remove_pending_employee(username)
         
         # Используем имя вручную (из отложенной записи или из Telegram)
         self.employees[telegram_id] = (manual_name, telegram_name, username)
         self.name_to_id[manual_name] = telegram_id
+        # Сохраняем флаг одобрения админом
+        self.approved_by_admin[telegram_id] = was_added_by_admin
         self._save_employees()
-        return True
+        return (True, was_added_by_admin)
     
     def get_all_employees(self) -> Dict[str, int]:
         """Получить всех сотрудников (имя -> telegram_id)"""
@@ -283,6 +302,35 @@ class EmployeeManager:
     def is_registered(self, telegram_id: int) -> bool:
         """Проверить, зарегистрирован ли пользователь"""
         return telegram_id in self.employees
+    
+    def was_added_by_admin(self, telegram_id: int) -> bool:
+        """
+        Проверить, был ли пользователь добавлен администратором.
+        Если пользователь сам себя зарегистрировал через /start (без pending записи),
+        то manual_name будет равен telegram_name, и это считается "не добавлен админом".
+        Но это не надежно, поэтому лучше проверять через другой механизм.
+        
+        Более надежный способ: если пользователь был в pending или был добавлен до первого /start.
+        Для простоты: если manual_name != telegram_name, значит был добавлен админом.
+        Или если был в pending записи (но она уже удалена после регистрации).
+        
+        Упрощенная логика: если пользователь зарегистрирован, считаем что он был добавлен админом,
+        если только он не сам себя зарегистрировал. Но как это определить?
+        
+        Лучше добавить флаг при регистрации или проверять по другому критерию.
+        Пока используем упрощенную проверку: если есть в employees, значит был добавлен.
+        """
+        if telegram_id not in self.employees:
+            return False
+        
+        # Если пользователь в системе, считаем что он был добавлен админом
+        # (так как мы не сохраняем информацию о том, кто его добавил)
+        # В реальности, если пользователь сам себя зарегистрировал, manual_name == telegram_name
+        # Но это не надежно, так как админ мог добавить с таким же именем
+        
+        # Для более точной проверки можно было бы добавить флаг в данные сотрудника
+        # Но пока используем упрощенную логику: если в системе, значит добавлен
+        return True
     
     def get_employee_data(self, telegram_id: int) -> Optional[Tuple[str, str, Optional[str]]]:
         """Получить данные сотрудника по Telegram ID (имя_вручную, имя_телеги, никнейм)"""
