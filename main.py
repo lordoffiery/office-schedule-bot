@@ -18,6 +18,7 @@ from schedule_manager import ScheduleManager
 from notification_manager import NotificationManager
 from admin_manager import AdminManager
 from logger import log_command
+from init_data import init_all
 import pytz
 
 
@@ -1303,6 +1304,9 @@ async def handle_text_message(message: Message):
 # Запуск бота
 async def main():
     """Основная функция запуска бота"""
+    # Инициализируем данные при первом запуске
+    init_all()
+    
     # Запускаем менеджер уведомлений
     notification_manager.start()
     
