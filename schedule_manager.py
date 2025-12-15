@@ -408,8 +408,10 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_QUEUE)
+                # Фильтруем пустые строки
+                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
                 # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['date', 'date_str', 'Дата'] else 0
                 for row in rows[start_idx:]:
                     if len(row) >= 3 and row[0] == date_str:
                         try:
@@ -473,9 +475,20 @@ class ScheduleManager:
                     all_rows = worksheet.get_all_values()
                     logger.info(f"Всего строк в Google Sheets: {len(all_rows)}")
                     
+                    # Фильтруем пустые строки
+                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    
                     # Пропускаем заголовок
-                    start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
-                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
+                    start_idx = 0
+                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
+                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
+                        if first_cell in ['date', 'date_str', 'Дата']:
+                            start_idx = 1
+                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
+                        else:
+                            rows_to_keep = []
+                    else:
+                        rows_to_keep = []
                     
                     # Если заголовка нет, добавляем его
                     if not rows_to_keep:
@@ -585,8 +598,10 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
+                # Фильтруем пустые строки
+                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
                 # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['week_start', 'week', 'Неделя'] else 0
+                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['week_start', 'week', 'Неделя'] else 0
                 for row in rows[start_idx:]:
                     if len(row) < 5 or not row[0] or row[0] != week_str:
                         continue
@@ -685,9 +700,20 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
+                    # Фильтруем пустые строки
+                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    
                     # Пропускаем заголовок
-                    start_idx = 1 if all_rows and all_rows[0][0] in ['week_start', 'week', 'Неделя'] else 0
-                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
+                    start_idx = 0
+                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
+                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
+                        if first_cell in ['week_start', 'week', 'Неделя']:
+                            start_idx = 1
+                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
+                        else:
+                            rows_to_keep = []
+                    else:
+                        rows_to_keep = []
                     # Оставляем только записи не для этой недели
                     for row in all_rows[start_idx:]:
                         if len(row) >= 1 and row[0] != week_str:
