@@ -170,6 +170,9 @@ async def cmd_help(message: Message):
             "   Пример: /admin_add_day @username 2024-12-20 2024-12-21\n\n"
             "/admin_set_default_schedule [день] [список сотрудников] - Установить расписание по умолчанию для дня\n"
             "   Пример: /admin_set_default_schedule Понедельник Вася, Дима Ч, Айлар, Егор, Илья, Даша, Виталий, Тимур\n"
+            "   Дни: Понедельник, Вторник, Среда, Четверг, Пятница\n\n"
+            "/admin_set_default_schedule [день] [список сотрудников] - Установить расписание по умолчанию для дня\n"
+            "   Пример: /admin_set_default_schedule Понедельник Вася, Дима Ч, Айлар, Егор, Илья, Даша, Виталий, Тимур\n"
             "   Дни: Понедельник, Вторник, Среда, Четверг, Пятница"
         )
     
@@ -1081,6 +1084,80 @@ async def cmd_admin_test_schedule(message: Message):
         response = f"❌ Ошибка при отправке расписания: {e}"
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
+
+
+@dp.message(Command("admin_set_default_schedule"))
+async def cmd_admin_set_default_schedule(message: Message):
+    """Установить расписание по умолчанию для дня (только для админов)"""
+    user_id = message.from_user.id
+    user_info = get_user_info(message)
+    
+    if not admin_manager.is_admin(user_id):
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
+        return
+    
+    # Парсим команду: /admin_set_default_schedule [день] [список сотрудников через запятую]
+    command_parts = message.text.split(maxsplit=2)
+    if len(command_parts) < 3:
+        response = (
+            "Используйте формат:\n"
+            "/admin_set_default_schedule [день] [список сотрудников]\n\n"
+            "Пример:\n"
+            "/admin_set_default_schedule Понедельник Вася, Дима Ч, Айлар, Егор, Илья, Даша, Виталий, Тимур\n\n"
+            "Дни: Понедельник, Вторник, Среда, Четверг, Пятница"
+        )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
+        return
+    
+    day_name = command_parts[1].strip()
+    employees_str = command_parts[2].strip()
+    
+    # Проверяем, что день недели корректен
+    valid_days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
+    if day_name not in valid_days:
+        response = f"❌ Неверный день недели: {day_name}\n\nДопустимые дни: {', '.join(valid_days)}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
+        return
+    
+    # Парсим список сотрудников
+    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+    
+    if not employees:
+        response = "❌ Список сотрудников не может быть пустым"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
+        return
+    
+    # Проверяем количество мест
+    if len(employees) > MAX_OFFICE_SEATS:
+        response = f"❌ Слишком много сотрудников: {len(employees)}. Максимум: {MAX_OFFICE_SEATS}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
+        return
+    
+    # Загружаем текущее расписание по умолчанию
+    default_schedule = schedule_manager.load_default_schedule()
+    
+    # Обновляем расписание для указанного дня
+    default_schedule[day_name] = employees
+    
+    # Сохраняем обновленное расписание
+    schedule_manager.save_default_schedule(default_schedule)
+    
+    # Форматируем имена сотрудников для ответа
+    formatted_employees = [employee_manager.format_employee_name(emp) for emp in employees]
+    
+    response = (
+        f"✅ Расписание по умолчанию для {day_name} обновлено:\n\n"
+        f"{', '.join(formatted_employees)}\n\n"
+        f"Всего сотрудников: {len(employees)}"
+    )
+    await message.reply(response)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
 
 
 @dp.message(Command("admin_skip_day"))
