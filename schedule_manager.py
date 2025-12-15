@@ -288,27 +288,50 @@ class ScheduleManager:
         # Пробуем сохранить в Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
-                # Формируем строку для таблицы: [date, day_name, employees]
-                employees_str = ', '.join(employees)
-                row = [date_str, day_name, employees_str]
-                # Ищем существующую запись для этой даты и дня
+                # Сохраняем все дни недели для этой даты (не только измененный день)
+                # Загружаем полное расписание для этой даты
+                full_schedule = self.load_schedule_for_date(date, employee_manager)
+                # Обновляем измененный день
+                full_schedule[day_name] = employees
+                
+                # Получаем все дни недели для этой даты
+                week_dates = self.get_week_dates(self.get_week_start(date))
+                
+                # Формируем строки для всех дней недели
+                rows_to_save = []
+                for d, day_n in week_dates:
+                    if d.date() == date.date():
+                        # Это измененный день - используем обновленные данные
+                        employees_for_day = employees
+                    else:
+                        # Для других дней используем данные из full_schedule
+                        employees_for_day = full_schedule.get(day_n, [])
+                    
+                    employees_str = ', '.join(employees_for_day)
+                    rows_to_save.append([date_str, day_n, employees_str])
+                
+                # Обновляем записи в Google Sheets
                 worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
                     # Пропускаем заголовок
                     start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
-                    found = False
-                    for i, row_data in enumerate(all_rows[start_idx:], start=start_idx + 1):
-                        if len(row_data) >= 2 and row_data[0] == date_str and row_data[1] == day_name:
-                            # Обновляем существующую запись
-                            worksheet.update(f'A{i}', [row], value_input_option='RAW')
-                            found = True
-                            break
-                    if not found:
-                        # Добавляем новую запись
-                        self.sheets_manager.append_row(SHEET_SCHEDULES, row)
+                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
+                    
+                    # Оставляем только записи не для этой даты
+                    for row in all_rows[start_idx:]:
+                        if len(row) >= 1 and row[0] != date_str:
+                            rows_to_keep.append(row)
+                    
+                    # Добавляем обновленные записи для этой даты
+                    rows_to_keep.extend(rows_to_save)
+                    
+                    # Перезаписываем весь лист
+                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
             except Exception as e:
-                print(f"Ошибка сохранения расписания в Google Sheets: {e}, используем файлы")
+                print(f"Ошибка сохранения расписания в Google Sheets: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Сохраняем в файл
         with open(schedule_file, 'w', encoding='utf-8') as f:
