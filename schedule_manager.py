@@ -6,10 +6,20 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from config import (
     SCHEDULES_DIR, REQUESTS_DIR, QUEUE_DIR, DEFAULT_SCHEDULE_FILE, 
-    DEFAULT_SCHEDULE, MAX_OFFICE_SEATS, DATA_DIR
+    DEFAULT_SCHEDULE, MAX_OFFICE_SEATS, DATA_DIR,
+    USE_GOOGLE_SHEETS, SHEET_REQUESTS, SHEET_SCHEDULES, SHEET_QUEUE, SHEET_DEFAULT_SCHEDULE
 )
 import pytz
 from config import TIMEZONE
+
+# Импортируем Google Sheets Manager только если нужно
+if USE_GOOGLE_SHEETS:
+    try:
+        from google_sheets_manager import GoogleSheetsManager
+    except ImportError:
+        GoogleSheetsManager = None
+else:
+    GoogleSheetsManager = None
 
 
 class ScheduleManager:
@@ -18,6 +28,15 @@ class ScheduleManager:
     def __init__(self, employee_manager=None):
         self.timezone = pytz.timezone(TIMEZONE)
         self.employee_manager = employee_manager
+        
+        # Инициализируем Google Sheets Manager если нужно
+        self.sheets_manager = None
+        if USE_GOOGLE_SHEETS and GoogleSheetsManager:
+            try:
+                self.sheets_manager = GoogleSheetsManager()
+            except Exception as e:
+                print(f"⚠️ Не удалось инициализировать Google Sheets для расписаний: {e}")
+        
         self._ensure_directories()
         self._save_default_schedule()
         # Обновляем имена в default_schedule.txt при старте, если есть employee_manager
@@ -97,10 +116,43 @@ class ScheduleManager:
     def load_schedule_for_date(self, date: datetime, employee_manager=None) -> Dict[str, List[str]]:
         """Загрузить расписание на конкретную дату"""
         date_str = date.strftime('%Y-%m-%d')
-        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+        schedule = {}
         
+        # Пробуем загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                # Пропускаем заголовок, если есть
+                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[0] == date_str:
+                        try:
+                            day_name = row[1].strip()
+                            employees_str = row[2].strip() if row[2] else ""
+                            employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                            
+                            # Форматируем имена, если нужно
+                            if employee_manager:
+                                formatted_employees = []
+                                for emp in employees:
+                                    if '(@' in emp and emp.endswith(')'):
+                                        formatted_employees.append(emp)
+                                    else:
+                                        formatted_employees.append(employee_manager.format_employee_name(emp))
+                                schedule[day_name] = formatted_employees
+                            else:
+                                schedule[day_name] = employees
+                        except (ValueError, IndexError):
+                            continue
+                # Если загрузили из Google Sheets, возвращаем результат
+                if schedule:
+                    return schedule
+            except Exception as e:
+                print(f"Ошибка загрузки расписания из Google Sheets: {e}, используем файлы")
+        
+        # Загружаем из файла
+        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
         if os.path.exists(schedule_file):
-            schedule = {}
             try:
                 with open(schedule_file, 'r', encoding='utf-8') as f:
                     current_day = None
@@ -126,7 +178,8 @@ class ScheduleManager:
                                 schedule[current_day] = formatted_employees
                             else:
                                 schedule[current_day] = employees
-                return schedule
+                if schedule:
+                    return schedule
             except Exception as e:
                 print(f"Ошибка загрузки расписания на {date_str}: {e}")
         
@@ -144,6 +197,36 @@ class ScheduleManager:
         """Сохранить расписание на неделю"""
         week_dates = self.get_week_dates(week_start)
         
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows_to_save = []
+                for date, day_name in week_dates:
+                    date_str = date.strftime('%Y-%m-%d')
+                    employees = schedule.get(day_name, [])
+                    employees_str = ', '.join(employees)
+                    rows_to_save.append([date_str, day_name, employees_str])
+                
+                # Обновляем записи для этой недели
+                worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
+                if worksheet:
+                    all_rows = worksheet.get_all_values()
+                    start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                    # Получаем даты недели
+                    week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
+                    # Оставляем только записи не для этой недели
+                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []
+                    for row in all_rows[start_idx:]:
+                        if len(row) >= 1 and row[0] not in week_dates_str:
+                            rows_to_keep.append(row)
+                    # Добавляем новые записи для этой недели
+                    rows_to_keep.extend(rows_to_save)
+                    # Перезаписываем весь лист
+                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
+            except Exception as e:
+                print(f"Ошибка сохранения расписания недели в Google Sheets: {e}, используем файлы")
+        
+        # Сохраняем в файлы
         for date, day_name in week_dates:
             date_str = date.strftime('%Y-%m-%d')
             schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
@@ -202,6 +285,31 @@ class ScheduleManager:
         # Сохраняем обновленное расписание
         schedule[day_name] = employees
         
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                # Формируем строку для таблицы: [date, day_name, employees]
+                employees_str = ', '.join(employees)
+                row = [date_str, day_name, employees_str]
+                # Ищем существующую запись для этой даты и дня
+                worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
+                if worksheet:
+                    all_rows = worksheet.get_all_values()
+                    # Пропускаем заголовок
+                    start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                    found = False
+                    for i, row_data in enumerate(all_rows[start_idx:], start=start_idx + 1):
+                        if len(row_data) >= 2 and row_data[0] == date_str and row_data[1] == day_name:
+                            # Обновляем существующую запись
+                            worksheet.update(f'A{i}', [row], value_input_option='RAW')
+                            found = True
+                            break
+                    if not found:
+                        # Добавляем новую запись
+                        self.sheets_manager.append_row(SHEET_SCHEDULES, row)
+            except Exception as e:
+                print(f"Ошибка сохранения расписания в Google Sheets: {e}, используем файлы")
+        
         # Сохраняем в файл
         with open(schedule_file, 'w', encoding='utf-8') as f:
             f.write(f"{date_str}\n")
@@ -215,7 +323,6 @@ class ScheduleManager:
     def add_to_queue(self, date: datetime, employee_name: str, telegram_id: int):
         """Добавить сотрудника в очередь на дату"""
         date_str = date.strftime('%Y-%m-%d')
-        queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
         
         # Проверяем, не в очереди ли уже
         queue = self.get_queue_for_date(date)
@@ -223,7 +330,16 @@ class ScheduleManager:
             if entry['employee_name'] == employee_name and entry['telegram_id'] == telegram_id:
                 return False  # Уже в очереди
         
-        # Добавляем в очередь
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                row = [date_str, employee_name, str(telegram_id)]
+                self.sheets_manager.append_row(SHEET_QUEUE, row)
+            except Exception as e:
+                print(f"Ошибка сохранения в очередь в Google Sheets: {e}, используем файлы")
+        
+        # Добавляем в очередь (файл)
+        queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
         with open(queue_file, 'a', encoding='utf-8') as f:
             f.write(f"{employee_name}:{telegram_id}\n")
         return True
@@ -231,9 +347,33 @@ class ScheduleManager:
     def get_queue_for_date(self, date: datetime) -> List[Dict]:
         """Получить очередь на дату"""
         date_str = date.strftime('%Y-%m-%d')
-        queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
-        
         queue = []
+        
+        # Пробуем загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_QUEUE)
+                # Пропускаем заголовок, если есть
+                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[0] == date_str:
+                        try:
+                            employee_name = row[1].strip()
+                            telegram_id = int(row[2].strip())
+                            queue.append({
+                                'employee_name': employee_name,
+                                'telegram_id': telegram_id
+                            })
+                        except (ValueError, IndexError):
+                            continue
+                # Если загрузили из Google Sheets, возвращаем результат
+                if queue or not os.path.exists(os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")):
+                    return queue
+            except Exception as e:
+                print(f"Ошибка загрузки очереди из Google Sheets: {e}, используем файлы")
+        
+        # Загружаем из файла
+        queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
         if os.path.exists(queue_file):
             try:
                 with open(queue_file, 'r', encoding='utf-8') as f:
@@ -257,17 +397,37 @@ class ScheduleManager:
     def remove_from_queue(self, date: datetime, employee_name: str, telegram_id: int):
         """Удалить сотрудника из очереди на дату"""
         date_str = date.strftime('%Y-%m-%d')
-        queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
-        
-        if not os.path.exists(queue_file):
-            return
         
         queue = self.get_queue_for_date(date)
         # Удаляем сотрудника из очереди
         queue = [entry for entry in queue 
                 if not (entry['employee_name'] == employee_name and entry['telegram_id'] == telegram_id)]
         
-        # Сохраняем обновленную очередь
+        # Пробуем обновить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                # Удаляем все записи для этой даты и добавляем обновленные
+                worksheet = self.sheets_manager.get_worksheet(SHEET_QUEUE)
+                if worksheet:
+                    all_rows = worksheet.get_all_values()
+                    # Пропускаем заголовок
+                    start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
+                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
+                    # Оставляем только записи не для этой даты или обновленные
+                    for row in all_rows[start_idx:]:
+                        if len(row) >= 3 and row[0] != date_str:
+                            rows_to_keep.append(row)
+                    # Добавляем обновленные записи для этой даты
+                    for entry in queue:
+                        rows_to_keep.append([date_str, entry['employee_name'], str(entry['telegram_id'])])
+                    # Перезаписываем весь лист
+                    if rows_to_keep:
+                        self.sheets_manager.write_rows(SHEET_QUEUE, rows_to_keep, clear_first=True)
+            except Exception as e:
+                print(f"Ошибка обновления очереди в Google Sheets: {e}, используем файлы")
+        
+        # Сохраняем обновленную очередь в файл
+        queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
         with open(queue_file, 'w', encoding='utf-8') as f:
             for entry in queue:
                 f.write(f"{entry['employee_name']}:{entry['telegram_id']}\n")
@@ -315,23 +475,80 @@ class ScheduleManager:
                     days_requested: List[str], days_skipped: List[str]):
         """Сохранить заявку сотрудника"""
         week_str = week_start.strftime('%Y-%m-%d')
-        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
         
         # Удаляем дубликаты
         days_requested = list(dict.fromkeys(days_requested))  # Сохраняет порядок
         days_skipped = list(dict.fromkeys(days_skipped))
         
+        days_req_str = ','.join(days_requested) if days_requested else ''
+        days_skip_str = ','.join(days_skipped) if days_skipped else ''
+        
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                # Формируем строку для таблицы: [week_start, employee_name, telegram_id, days_requested, days_skipped]
+                row = [week_str, employee_name, str(telegram_id), days_req_str, days_skip_str]
+                self.sheets_manager.append_row(SHEET_REQUESTS, row)
+            except Exception as e:
+                print(f"Ошибка сохранения заявки в Google Sheets: {e}, используем файлы")
+        
+        # Сохраняем в файл
+        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
         with open(request_file, 'a', encoding='utf-8') as f:
-            days_req_str = ','.join(days_requested) if days_requested else ''
-            days_skip_str = ','.join(days_skipped) if days_skipped else ''
             f.write(f"{employee_name}:{telegram_id}:{week_str}:{days_req_str}:{days_skip_str}\n")
     
     def load_requests_for_week(self, week_start: datetime) -> List[Dict]:
         """Загрузить все заявки на неделю (схлопывает дубликаты для одного сотрудника)"""
         week_str = week_start.strftime('%Y-%m-%d')
-        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
-        
         requests_dict = {}  # Ключ: (employee_name, telegram_id), значение: заявка
+        
+        # Пробуем загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
+                # Пропускаем заголовок, если есть
+                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['week_start', 'week', 'Неделя'] else 0
+                for row in rows[start_idx:]:
+                    if len(row) < 5 or not row[0] or row[0] != week_str:
+                        continue
+                    try:
+                        employee_name = row[1].strip()
+                        telegram_id = int(row[2].strip())
+                        days_requested = [d.strip() for d in row[3].split(',') if d.strip()] if row[3] else []
+                        days_skipped = [d.strip() for d in row[4].split(',') if d.strip()] if row[4] else []
+                        
+                        key = (employee_name, telegram_id)
+                        
+                        # Если уже есть заявка для этого сотрудника, объединяем
+                        if key in requests_dict:
+                            existing = requests_dict[key]
+                            combined_requested = list(dict.fromkeys(existing['days_requested'] + days_requested))
+                            combined_skipped = list(dict.fromkeys(existing['days_skipped'] + days_skipped))
+                            combined_requested = [d for d in combined_requested if d not in combined_skipped]
+                            
+                            requests_dict[key] = {
+                                'employee_name': employee_name,
+                                'telegram_id': telegram_id,
+                                'days_requested': combined_requested,
+                                'days_skipped': combined_skipped
+                            }
+                        else:
+                            requests_dict[key] = {
+                                'employee_name': employee_name,
+                                'telegram_id': telegram_id,
+                                'days_requested': days_requested,
+                                'days_skipped': days_skipped
+                            }
+                    except (ValueError, IndexError):
+                        continue
+                # Если загрузили из Google Sheets, возвращаем результат
+                if requests_dict:
+                    return list(requests_dict.values())
+            except Exception as e:
+                print(f"Ошибка загрузки заявок из Google Sheets: {e}, используем файлы")
+        
+        # Загружаем из файла
+        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
         if not os.path.exists(request_file):
             return []
         
@@ -382,6 +599,26 @@ class ScheduleManager:
     def clear_requests_for_week(self, week_start: datetime):
         """Очистить заявки на неделю (после формирования расписания)"""
         week_str = week_start.strftime('%Y-%m-%d')
+        
+        # Пробуем удалить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
+                if worksheet:
+                    all_rows = worksheet.get_all_values()
+                    # Пропускаем заголовок
+                    start_idx = 1 if all_rows and all_rows[0][0] in ['week_start', 'week', 'Неделя'] else 0
+                    rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
+                    # Оставляем только записи не для этой недели
+                    for row in all_rows[start_idx:]:
+                        if len(row) >= 1 and row[0] != week_str:
+                            rows_to_keep.append(row)
+                    # Перезаписываем весь лист
+                    self.sheets_manager.write_rows(SHEET_REQUESTS, rows_to_keep, clear_first=True)
+            except Exception as e:
+                print(f"Ошибка очистки заявок в Google Sheets: {e}, используем файлы")
+        
+        # Удаляем файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
         if os.path.exists(request_file):
             os.remove(request_file)
