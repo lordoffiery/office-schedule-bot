@@ -67,6 +67,31 @@ class ScheduleManager:
     def load_default_schedule(self) -> Dict[str, List[str]]:
         """Загрузить расписание по умолчанию"""
         schedule = {}
+        
+        # Пробуем загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
+                # Фильтруем пустые строки
+                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
+                # Пропускаем заголовок, если есть
+                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['day', 'day_name', 'День'] else 0
+                for row in rows[start_idx:]:
+                    if len(row) >= 2:
+                        try:
+                            day_name = row[0].strip()
+                            employees_str = row[1].strip() if row[1] else ""
+                            employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                            schedule[day_name] = employees
+                        except (ValueError, IndexError):
+                            continue
+                # Если загрузили из Google Sheets, возвращаем результат
+                if schedule:
+                    return schedule
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки расписания по умолчанию из Google Sheets: {e}, используем файлы")
+        
+        # Загружаем из файла
         if os.path.exists(DEFAULT_SCHEDULE_FILE):
             try:
                 with open(DEFAULT_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
@@ -79,7 +104,7 @@ class ScheduleManager:
                             current_day = line
                             schedule[current_day] = []
                         elif current_day:
-                            employees = [e.strip() for e in line.split(',')]
+                            employees = [e.strip() for e in line.split(',') if e.strip()]
                             schedule[current_day] = employees
             except Exception as e:
                 logger.error(f"Ошибка загрузки расписания по умолчанию: {e}")
@@ -89,6 +114,53 @@ class ScheduleManager:
             schedule = DEFAULT_SCHEDULE.copy()
         
         return schedule
+    
+    def save_default_schedule(self, schedule: Dict[str, List[str]]):
+        """Сохранить расписание по умолчанию в Google Sheets и файл"""
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows_to_save = []
+                for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+                    employees = schedule.get(day_name, [])
+                    employees_str = ', '.join(employees)
+                    rows_to_save.append([day_name, employees_str])
+                
+                # Проверяем, есть ли заголовок
+                worksheet = self.sheets_manager.get_worksheet(SHEET_DEFAULT_SCHEDULE)
+                if worksheet:
+                    all_rows = worksheet.get_all_values()
+                    # Фильтруем пустые строки
+                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    
+                    # Проверяем наличие заголовка
+                    has_header = False
+                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
+                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
+                        if first_cell in ['day', 'day_name', 'День']:
+                            has_header = True
+                    
+                    # Добавляем заголовок, если его нет
+                    if not has_header:
+                        rows_to_save = [['day_name', 'employees']] + rows_to_save
+                    else:
+                        # Сохраняем заголовок
+                        rows_to_save = [all_rows[0]] + rows_to_save
+                    
+                    # Перезаписываем весь лист
+                    self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
+                    logger.info(f"Расписание по умолчанию сохранено в Google Sheets")
+            except Exception as e:
+                logger.error(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}, используем файлы")
+        
+        # Сохраняем в файл
+        try:
+            with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
+                for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+                    employees = schedule.get(day_name, [])
+                    f.write(f"{day_name}: {', '.join(employees)}\n")
+        except Exception as e:
+            logger.error(f"Ошибка сохранения расписания по умолчанию в файл: {e}")
     
     def get_plain_name_from_formatted(self, formatted_name: str) -> str:
         """Извлечь простое имя из отформатированного (например, 'Рома(@rsidorenkov)' -> 'Рома')"""
