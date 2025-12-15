@@ -195,8 +195,10 @@ class NotificationManager:
             except Exception as e:
                 logger.error(f"Ошибка отправки расписания {telegram_id}: {e}")
         
-        # Очищаем заявки после отправки
-        self.schedule_manager.clear_requests_for_week(next_week_start)
+        # Очищаем заявки после отправки только если это не тестовая рассылка
+        # (при тестовой рассылке для админов заявки не должны очищаться)
+        if not admins_only:
+            self.schedule_manager.clear_requests_for_week(next_week_start)
     
     async def merge_duplicates_daily(self):
         """Ежедневное схлопывание дубликатов сотрудников"""
