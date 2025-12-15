@@ -12,6 +12,7 @@ from config import (
 )
 import pytz
 from config import TIMEZONE
+from utils import get_header_start_idx, filter_empty_rows, ensure_header
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -72,10 +73,8 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
-                # Фильтруем пустые строки
-                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
-                # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['day', 'day_name', 'День'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['day', 'day_name', 'День'])
                 for row in rows[start_idx:]:
                     if len(row) >= 2:
                         try:
@@ -130,22 +129,19 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_DEFAULT_SCHEDULE)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    # Фильтруем пустые строки
-                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
-                    
-                    # Проверяем наличие заголовка
-                    has_header = False
-                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
-                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['day', 'day_name', 'День']:
-                            has_header = True
-                    
-                    # Добавляем заголовок, если его нет
-                    if not has_header:
-                        rows_to_save = [['day_name', 'employees']] + rows_to_save
+                    all_rows = filter_empty_rows(all_rows)
+                    # Убеждаемся, что есть заголовок
+                    rows_to_save = ensure_header(all_rows, ['day_name', 'employees'], ['day', 'day_name', 'День'])
+                    # Заменяем данные на новые (сохраняем только заголовок + новые данные)
+                    if len(rows_to_save) > 0:
+                        rows_to_save = [rows_to_save[0]]  # Сохраняем заголовок
                     else:
-                        # Сохраняем заголовок
-                        rows_to_save = [all_rows[0]] + rows_to_save
+                        rows_to_save = [['day_name', 'employees']]
+                    # Добавляем новые данные
+                    for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+                        employees = schedule.get(day_name, [])
+                        employees_str = ', '.join(employees)
+                        rows_to_save.append([day_name, employees_str])
                     
                     # Перезаписываем весь лист
                     self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
@@ -189,6 +185,41 @@ class ScheduleManager:
             dates.append((date, day_name))
         return dates
     
+    def has_saved_schedules_for_week(self, week_start: datetime) -> bool:
+        """
+        Проверить, есть ли сохраненные расписания для недели
+        (проверяет и локальные файлы, и Google Sheets)
+        
+        Args:
+            week_start: Начало недели
+            
+        Returns:
+            True если есть сохраненные расписания, False иначе
+        """
+        week_dates = self.get_week_dates(week_start)
+        
+        # Сначала проверяем локальные файлы
+        for d, day_name in week_dates:
+            date_str = d.strftime('%Y-%m-%d')
+            schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+            if os.path.exists(schedule_file):
+                return True
+        
+        # Если локальных файлов нет, проверяем Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+                week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
+                for row in rows[start_idx:]:
+                    if len(row) >= 1 and row[0] and row[0].strip() in week_dates_str:
+                        return True
+            except Exception as e:
+                logger.warning(f"Ошибка проверки расписаний в Google Sheets: {e}")
+        
+        return False
+    
     def load_schedule_for_date(self, date: datetime, employee_manager=None) -> Dict[str, List[str]]:
         """Загрузить расписание на конкретную дату"""
         date_str = date.strftime('%Y-%m-%d')
@@ -198,10 +229,8 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
-                # Фильтруем пустые строки
-                rows = [row for row in rows if row and any(cell.strip() for cell in row)]
-                # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['date', 'date_str', 'Дата'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
                 for row in rows[start_idx:]:
                     if len(row) >= 3 and row[0] and row[0].strip() == date_str:
                         try:
@@ -289,23 +318,14 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    # Фильтруем пустые строки
-                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    all_rows = filter_empty_rows(all_rows)
                     
                     # Получаем даты недели
                     week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
                     
                     # Пропускаем заголовок, если есть
-                    start_idx = 0
-                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
-                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['date', 'date_str', 'Дата']:
-                            start_idx = 1
-                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
-                        else:
-                            rows_to_keep = []
-                    else:
-                        rows_to_keep = []
+                    start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
+                    rows_to_keep = [all_rows[0]] if has_header else [['date', 'day_name', 'employees']]
                     
                     # Оставляем только записи не для этой недели
                     for row in all_rows[start_idx:]:
@@ -389,24 +409,11 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    # Фильтруем пустые строки
-                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    all_rows = filter_empty_rows(all_rows)
                     
                     # Пропускаем заголовок, если есть
-                    start_idx = 0
-                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
-                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['date', 'date_str', 'Дата']:
-                            start_idx = 1
-                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
-                        else:
-                            rows_to_keep = []
-                    else:
-                        rows_to_keep = []
-                    
-                    # Если заголовка нет, добавляем его
-                    if not rows_to_keep:
-                        rows_to_keep = [['date', 'day_name', 'employees']]
+                    start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
+                    rows_to_keep = [all_rows[0]] if has_header else [['date', 'day_name', 'employees']]
                     
                     # Оставляем только записи не для этой даты и дня
                     found = False
@@ -480,10 +487,8 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_QUEUE)
-                # Фильтруем пустые строки
-                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
-                # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['date', 'date_str', 'Дата'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
                 for row in rows[start_idx:]:
                     if len(row) >= 3 and row[0] == date_str:
                         try:
@@ -550,24 +555,11 @@ class ScheduleManager:
                     all_rows = worksheet.get_all_values()
                     logger.info(f"Всего строк в Google Sheets: {len(all_rows)}")
                     
-                    # Фильтруем пустые строки
-                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    all_rows = filter_empty_rows(all_rows)
                     
                     # Пропускаем заголовок
-                    start_idx = 0
-                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
-                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['date', 'date_str', 'Дата']:
-                            start_idx = 1
-                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
-                        else:
-                            rows_to_keep = []
-                    else:
-                        rows_to_keep = []
-                    
-                    # Если заголовка нет, добавляем его
-                    if not rows_to_keep:
-                        rows_to_keep = [['date', 'employee_name', 'telegram_id']]
+                    start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
+                    rows_to_keep = [all_rows[0]] if has_header else [['date', 'employee_name', 'telegram_id']]
                     
                     # Оставляем только записи не для этой даты
                     for row in all_rows[start_idx:]:
@@ -657,15 +649,10 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    # Фильтруем пустые строки
-                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    all_rows = filter_empty_rows(all_rows)
                     
                     # Проверяем, есть ли заголовок
-                    has_header = False
-                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
-                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['week_start', 'week', 'Неделя', 'week_start', 'employee_name']:
-                            has_header = True
+                    _, has_header = get_header_start_idx(all_rows, ['week_start', 'week', 'Неделя', 'employee_name'])
                     
                     # Если заголовка нет, добавляем его
                     if not has_header:
@@ -693,10 +680,8 @@ class ScheduleManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
-                # Фильтруем пустые строки
-                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
-                # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['week_start', 'week', 'Неделя', 'employee_name'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['week_start', 'week', 'Неделя', 'employee_name'])
                 for row in rows[start_idx:]:
                     if len(row) < 5 or not row[0] or row[0] != week_str:
                         continue
@@ -798,24 +783,11 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
-                    # Фильтруем пустые строки
-                    all_rows = [row for row in all_rows if row and any(cell.strip() for cell in row if cell)]
+                    all_rows = filter_empty_rows(all_rows)
                     
                     # Пропускаем заголовок
-                    start_idx = 0
-                    if all_rows and len(all_rows) > 0 and len(all_rows[0]) > 0:
-                        first_cell = all_rows[0][0].strip() if all_rows[0][0] else ''
-                        if first_cell in ['week_start', 'week', 'Неделя', 'employee_name']:
-                            start_idx = 1
-                            rows_to_keep = [all_rows[0]]  # Сохраняем заголовок
-                        else:
-                            rows_to_keep = []
-                    else:
-                        rows_to_keep = []
-                    
-                    # Если заголовка нет, добавляем его
-                    if not rows_to_keep:
-                        rows_to_keep = [['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']]
+                    start_idx, has_header = get_header_start_idx(all_rows, ['week_start', 'week', 'Неделя', 'employee_name'])
+                    rows_to_keep = [all_rows[0]] if has_header else [['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']]
                     
                     # Оставляем только записи не для этой недели
                     for row in all_rows[start_idx:]:

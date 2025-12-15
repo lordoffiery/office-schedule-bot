@@ -8,6 +8,7 @@ from config import (
     EMPLOYEES_FILE, DATA_DIR, PENDING_EMPLOYEES_FILE,
     USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES
 )
+from utils import get_header_start_idx, filter_empty_rows
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -52,8 +53,8 @@ class EmployeeManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_EMPLOYEES)
-                # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['manual_name', 'Имя вручную'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['manual_name', 'Имя вручную'])
                 for row in rows[start_idx:]:
                     if len(row) < 3 or not row[0] or not row[2]:
                         continue
@@ -187,7 +188,8 @@ class EmployeeManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
-                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['username', 'Username'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['username', 'Username'])
                 for row in rows[start_idx:]:
                     if len(row) >= 2 and row[0] and row[1]:
                         username = row[0].strip().lower()

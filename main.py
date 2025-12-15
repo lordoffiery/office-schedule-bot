@@ -9,8 +9,6 @@ from typing import Optional
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import API_TOKEN, ADMIN_IDS, WEEKDAYS_RU, TIMEZONE, MAX_OFFICE_SEATS, SCHEDULES_DIR, SHEET_SCHEDULES
@@ -48,11 +46,6 @@ def get_user_info(message: Message):
         'username': message.from_user.username,
         'first_name': message.from_user.first_name or "Пользователь"
     }
-
-
-# FSM состояния
-class ScheduleStates(StatesGroup):
-    waiting_for_week_days = State()
 
 
 # Вспомогательные функции
@@ -189,7 +182,7 @@ async def cmd_help(message: Message):
 
 
 @dp.message(Command("set_week_days"))
-async def cmd_set_week_days(message: Message, state: FSMContext):
+async def cmd_set_week_days(message: Message):
     """Команда для установки дней на следующую неделю (поддерживает даты и названия дней)"""
     user_id = message.from_user.id
     
@@ -383,15 +376,8 @@ async def cmd_my_schedule(message: Message):
     current_week_start = schedule_manager.get_week_start(now)
     
     # Проверяем, есть ли уже сохраненные расписания для текущей недели
-    # (если они были созданы через /skip_day или /add_day)
+    has_saved_schedules = schedule_manager.has_saved_schedules_for_week(current_week_start)
     week_dates = schedule_manager.get_week_dates(current_week_start)
-    has_saved_schedules = False
-    for date, day_name in week_dates:
-        date_str = date.strftime('%Y-%m-%d')
-        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
-        if os.path.exists(schedule_file):
-            has_saved_schedules = True
-            break
     
     if has_saved_schedules:
         # Используем сохраненные расписания
@@ -776,32 +762,8 @@ async def cmd_full_schedule(message: Message):
     week_start = schedule_manager.get_week_start(date)
     
     # Проверяем, есть ли уже сохраненные расписания для этой недели
-    # (проверяем и локальные файлы, и Google Sheets)
+    has_saved_schedules = schedule_manager.has_saved_schedules_for_week(week_start)
     week_dates = schedule_manager.get_week_dates(week_start)
-    has_saved_schedules = False
-    
-    # Сначала проверяем локальные файлы
-    for d, day_name in week_dates:
-        date_str = d.strftime('%Y-%m-%d')
-        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
-        if os.path.exists(schedule_file):
-            has_saved_schedules = True
-            break
-    
-    # Если локальных файлов нет, проверяем Google Sheets
-    if not has_saved_schedules:
-        if schedule_manager.sheets_manager and schedule_manager.sheets_manager.is_available():
-            try:
-                rows = schedule_manager.sheets_manager.read_all_rows(SHEET_SCHEDULES)
-                rows = [row for row in rows if row and any(cell.strip() for cell in row if cell)]
-                start_idx = 1 if rows and len(rows) > 0 and len(rows[0]) > 0 and rows[0][0].strip() in ['date', 'date_str', 'Дата'] else 0
-                week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
-                for row in rows[start_idx:]:
-                    if len(row) >= 1 and row[0] and row[0].strip() in week_dates_str:
-                        has_saved_schedules = True
-                        break
-            except Exception as e:
-                logger.warning(f"Ошибка проверки расписаний в Google Sheets: {e}")
     
     if has_saved_schedules:
         # Используем сохраненные расписания

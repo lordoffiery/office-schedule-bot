@@ -5,6 +5,7 @@ import os
 import logging
 from typing import List, Set
 from config import ADMINS_FILE, DATA_DIR, ADMIN_IDS, USE_GOOGLE_SHEETS, SHEET_ADMINS
+from utils import get_header_start_idx, filter_empty_rows
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -41,8 +42,8 @@ class AdminManager:
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_ADMINS)
-                # Пропускаем заголовок, если есть
-                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['admin_id', 'telegram_id', 'ID'] else 0
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['admin_id', 'telegram_id', 'ID'])
                 for row in rows[start_idx:]:
                     if row and row[0]:
                         try:
