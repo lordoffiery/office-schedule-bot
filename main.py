@@ -167,7 +167,10 @@ async def cmd_help(message: Message):
             "   Пример: /admin_skip_day @username 2024-12-20 2024-12-21\n\n"
             "/admin_add_day @username [дата] - Добавить день для сотрудника\n"
             "   Пример: /admin_add_day @username 2024-12-20\n"
-            "   Пример: /admin_add_day @username 2024-12-20 2024-12-21"
+            "   Пример: /admin_add_day @username 2024-12-20 2024-12-21\n\n"
+            "/admin_set_default_schedule [день] [список сотрудников] - Установить расписание по умолчанию для дня\n"
+            "   Пример: /admin_set_default_schedule Понедельник Вася, Дима Ч, Айлар, Егор, Илья, Даша, Виталий, Тимур\n"
+            "   Дни: Понедельник, Вторник, Среда, Четверг, Пятница"
         )
     
     await message.reply(help_text)
