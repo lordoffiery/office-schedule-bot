@@ -45,6 +45,7 @@ SHEET_PENDING_EMPLOYEES = 'pending_employees'
 SHEET_SCHEDULES = 'schedules'
 SHEET_REQUESTS = 'requests'
 SHEET_QUEUE = 'queue'
+SHEET_LOGS = 'logs'
 
 # Максимальное количество мест в офисе
 MAX_OFFICE_SEATS = 8
