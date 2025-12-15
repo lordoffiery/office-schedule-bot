@@ -24,7 +24,7 @@ if USE_GOOGLE_SHEETS:
     except ImportError:
         pass
     except Exception as e:
-        print(f"⚠️ Не удалось инициализировать Google Sheets для логов: {e}")
+        logger.warning(f"Не удалось инициализировать Google Sheets для логов: {e}")
 
 # Настраиваем форматтер
 formatter = logging.Formatter(
@@ -90,5 +90,5 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
             sheets_manager.append_row(SHEET_LOGS, row)
         except Exception as e:
             # Не прерываем работу, если не удалось записать в Google Sheets
-            print(f"⚠️ Ошибка записи лога в Google Sheets: {e}")
+            logger.warning(f"Ошибка записи лога в Google Sheets: {e}")
 

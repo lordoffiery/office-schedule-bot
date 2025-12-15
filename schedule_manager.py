@@ -2,6 +2,7 @@
 Управление расписаниями
 """
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from config import (
@@ -11,6 +12,9 @@ from config import (
 )
 import pytz
 from config import TIMEZONE
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 # Импортируем Google Sheets Manager только если нужно
 if USE_GOOGLE_SHEETS:
@@ -35,7 +39,7 @@ class ScheduleManager:
             try:
                 self.sheets_manager = GoogleSheetsManager()
             except Exception as e:
-                print(f"⚠️ Не удалось инициализировать Google Sheets для расписаний: {e}")
+                logger.warning(f"Не удалось инициализировать Google Sheets для расписаний: {e}")
         
         self._ensure_directories()
         self._save_default_schedule()
@@ -78,7 +82,7 @@ class ScheduleManager:
                             employees = [e.strip() for e in line.split(',')]
                             schedule[current_day] = employees
             except Exception as e:
-                print(f"Ошибка загрузки расписания по умолчанию: {e}")
+                logger.error(f"Ошибка загрузки расписания по умолчанию: {e}")
         
         # Если не загрузилось, используем из config
         if not schedule:
@@ -148,7 +152,7 @@ class ScheduleManager:
                 if schedule:
                     return schedule
             except Exception as e:
-                print(f"Ошибка загрузки расписания из Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка загрузки расписания из Google Sheets: {e}, используем файлы")
         
         # Загружаем из файла
         schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
@@ -181,7 +185,7 @@ class ScheduleManager:
                 if schedule:
                     return schedule
             except Exception as e:
-                print(f"Ошибка загрузки расписания на {date_str}: {e}")
+                logger.error(f"Ошибка загрузки расписания на {date_str}: {e}")
         
         # Если файла нет, возвращаем расписание по умолчанию
         default_schedule = self.load_default_schedule()
@@ -224,7 +228,7 @@ class ScheduleManager:
                     # Перезаписываем весь лист
                     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
             except Exception as e:
-                print(f"Ошибка сохранения расписания недели в Google Sheets: {e}, используем файлы")
+                logger.error(f"Ошибка сохранения расписания недели в Google Sheets: {e}, используем файлы")
         
         # Сохраняем в файлы
         for date, day_name in week_dates:
@@ -288,7 +292,7 @@ class ScheduleManager:
         # Пробуем сохранить в Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
-                print(f"🔵 Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
+                logger.info(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
                 # Сохраняем только измененный день (как в файле)
                 employees_str = ', '.join(employees)
                 row = [date_str, day_name, employees_str]
@@ -321,17 +325,15 @@ class ScheduleManager:
                         rows_to_keep.append(row)
                     
                     # Перезаписываем весь лист
-                    print(f"🔵 Сохраняю {len(rows_to_keep)} строк в Google Sheets")
+                    logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets")
                     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
-                    print(f"✅ Расписание сохранено в Google Sheets")
+                    logger.info(f"Расписание сохранено в Google Sheets")
                 else:
-                    print(f"⚠️ Не удалось получить лист {SHEET_SCHEDULES}")
+                    logger.warning(f"Не удалось получить лист {SHEET_SCHEDULES}")
             except Exception as e:
-                print(f"❌ Ошибка сохранения расписания в Google Sheets: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"Ошибка сохранения расписания в Google Sheets: {e}", exc_info=True)
         else:
-            print(f"⚠️ Google Sheets не доступен (sheets_manager={self.sheets_manager}, is_available={self.sheets_manager.is_available() if self.sheets_manager else False})")
+            logger.warning(f"Google Sheets не доступен (sheets_manager={self.sheets_manager}, is_available={self.sheets_manager.is_available() if self.sheets_manager else False})")
         
         # Сохраняем в файл
         with open(schedule_file, 'w', encoding='utf-8') as f:
@@ -359,7 +361,7 @@ class ScheduleManager:
                 row = [date_str, employee_name, str(telegram_id)]
                 self.sheets_manager.append_row(SHEET_QUEUE, row)
             except Exception as e:
-                print(f"Ошибка сохранения в очередь в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения в очередь в Google Sheets: {e}, используем файлы")
         
         # Добавляем в очередь (файл)
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -393,7 +395,7 @@ class ScheduleManager:
                 if queue or not os.path.exists(os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")):
                     return queue
             except Exception as e:
-                print(f"Ошибка загрузки очереди из Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка загрузки очереди из Google Sheets: {e}, используем файлы")
         
         # Загружаем из файла
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -413,7 +415,7 @@ class ScheduleManager:
                                 'telegram_id': telegram_id
                             })
             except Exception as e:
-                print(f"Ошибка загрузки очереди: {e}")
+                logger.error(f"Ошибка загрузки очереди: {e}")
         
         return queue
     
@@ -447,7 +449,7 @@ class ScheduleManager:
                     if rows_to_keep:
                         self.sheets_manager.write_rows(SHEET_QUEUE, rows_to_keep, clear_first=True)
             except Exception as e:
-                print(f"Ошибка обновления очереди в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка обновления очереди в Google Sheets: {e}, используем файлы")
         
         # Сохраняем обновленную очередь в файл
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -513,7 +515,7 @@ class ScheduleManager:
                 row = [week_str, employee_name, str(telegram_id), days_req_str, days_skip_str]
                 self.sheets_manager.append_row(SHEET_REQUESTS, row)
             except Exception as e:
-                print(f"Ошибка сохранения заявки в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения заявки в Google Sheets: {e}, используем файлы")
         
         # Сохраняем в файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
@@ -568,7 +570,7 @@ class ScheduleManager:
                 if requests_dict:
                     return list(requests_dict.values())
             except Exception as e:
-                print(f"Ошибка загрузки заявок из Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка загрузки заявок из Google Sheets: {e}, используем файлы")
         
         # Загружаем из файла
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
@@ -615,7 +617,7 @@ class ScheduleManager:
                                 'days_skipped': days_skipped
                             }
         except Exception as e:
-            print(f"Ошибка загрузки заявок: {e}")
+            logger.error(f"Ошибка загрузки заявок: {e}")
         
         return list(requests_dict.values())
     
@@ -639,7 +641,7 @@ class ScheduleManager:
                     # Перезаписываем весь лист
                     self.sheets_manager.write_rows(SHEET_REQUESTS, rows_to_keep, clear_first=True)
             except Exception as e:
-                print(f"Ошибка очистки заявок в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка очистки заявок в Google Sheets: {e}, используем файлы")
         
         # Удаляем файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
@@ -752,7 +754,7 @@ class ScheduleManager:
             with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
                 f.writelines(updated_lines)
         except Exception as e:
-            print(f"Ошибка обновления имени в default_schedule.txt: {e}")
+            logger.error(f"Ошибка обновления имени в default_schedule.txt: {e}")
     
     def _update_all_employee_names_in_default_schedule(self):
         """Обновить все имена сотрудников в default_schedule.txt при старте бота"""

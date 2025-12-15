@@ -3,9 +3,13 @@
 """
 import os
 import json
+import logging
 from typing import Dict, List, Optional, Any
 import gspread
 from google.oauth2.service_account import Credentials
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 
 class GoogleSheetsManager:
@@ -31,10 +35,10 @@ class GoogleSheetsManager:
                         credentials_dict = json.load(f)
                     credentials_json = json.dumps(credentials_dict)
                 except Exception as e:
-                    print(f"⚠️ Не удалось прочитать файл credentials: {e}")
+                    logger.warning(f"Не удалось прочитать файл credentials: {e}")
         
         if not credentials_json or not spreadsheet_id:
-            print("⚠️ Google Sheets не настроен. Используются локальные файлы.")
+            logger.warning("Google Sheets не настроен. Используются локальные файлы.")
             return None
         
         try:
@@ -51,9 +55,9 @@ class GoogleSheetsManager:
             creds = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
             self.client = gspread.authorize(creds)
             self.spreadsheet = self.client.open_by_key(spreadsheet_id)
-            print(f"✅ Google Sheets подключен (ID: {spreadsheet_id})")
+            logger.info(f"Google Sheets подключен (ID: {spreadsheet_id})")
         except Exception as e:
-            print(f"❌ Ошибка подключения к Google Sheets: {e}")
+            logger.error(f"Ошибка подключения к Google Sheets: {e}", exc_info=True)
             self.client = None
             self.spreadsheet = None
     
@@ -85,7 +89,7 @@ class GoogleSheetsManager:
         try:
             return worksheet.get_all_values()
         except Exception as e:
-            print(f"Ошибка чтения из {worksheet_name}: {e}")
+            logger.error(f"Ошибка чтения из {worksheet_name}: {e}")
             return []
     
     def write_rows(self, worksheet_name: str, rows: List[List[str]], clear_first: bool = True):
@@ -104,7 +108,7 @@ class GoogleSheetsManager:
                 worksheet.update(rows, value_input_option='RAW')
             return True
         except Exception as e:
-            print(f"Ошибка записи в {worksheet_name}: {e}")
+            logger.error(f"Ошибка записи в {worksheet_name}: {e}")
             return False
     
     def append_row(self, worksheet_name: str, row: List[str]):
@@ -120,7 +124,7 @@ class GoogleSheetsManager:
             worksheet.append_row(row, value_input_option='RAW')
             return True
         except Exception as e:
-            print(f"Ошибка добавления строки в {worksheet_name}: {e}")
+            logger.error(f"Ошибка добавления строки в {worksheet_name}: {e}")
             return False
     
     def find_and_update_row(self, worksheet_name: str, search_col: int, search_value: str, new_row: List[str]):
@@ -141,7 +145,7 @@ class GoogleSheetsManager:
                     return True
             return False
         except Exception as e:
-            print(f"Ошибка обновления строки в {worksheet_name}: {e}")
+            logger.error(f"Ошибка обновления строки в {worksheet_name}: {e}")
             return False
     
     def find_and_delete_row(self, worksheet_name: str, search_col: int, search_value: str):
@@ -161,7 +165,7 @@ class GoogleSheetsManager:
                     return True
             return False
         except Exception as e:
-            print(f"Ошибка удаления строки в {worksheet_name}: {e}")
+            logger.error(f"Ошибка удаления строки в {worksheet_name}: {e}")
             return False
     
     def get_cell_value(self, worksheet_name: str, cell: str) -> Optional[str]:
@@ -176,7 +180,7 @@ class GoogleSheetsManager:
         try:
             return worksheet.acell(cell).value
         except Exception as e:
-            print(f"Ошибка чтения ячейки {cell} из {worksheet_name}: {e}")
+            logger.error(f"Ошибка чтения ячейки {cell} из {worksheet_name}: {e}")
             return None
     
     def set_cell_value(self, worksheet_name: str, cell: str, value: str):
@@ -192,6 +196,6 @@ class GoogleSheetsManager:
             worksheet.update(cell, value, value_input_option='RAW')
             return True
         except Exception as e:
-            print(f"Ошибка записи ячейки {cell} в {worksheet_name}: {e}")
+            logger.error(f"Ошибка записи ячейки {cell} в {worksheet_name}: {e}")
             return False
 

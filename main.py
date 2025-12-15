@@ -436,7 +436,7 @@ async def process_skip_day(date: datetime, employee_name: str, user_id: int, emp
                             f"Вы автоматически добавлены в расписание."
                         )
                     except Exception as e:
-                        print(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
+                        logger.error(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
                     
                     # Обновляем количество свободных мест после добавления из очереди
                     schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
@@ -1316,6 +1316,13 @@ async def main():
 
 
 if __name__ == "__main__":
-    print("Бот запущен...")
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Бот запущен...")
     asyncio.run(main())
 

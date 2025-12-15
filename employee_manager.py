@@ -2,11 +2,15 @@
 Управление сотрудниками
 """
 import os
+import logging
 from typing import Dict, Optional, List, Tuple
 from config import (
     EMPLOYEES_FILE, DATA_DIR, PENDING_EMPLOYEES_FILE,
     USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES
 )
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 # Импортируем Google Sheets Manager только если нужно
 if USE_GOOGLE_SHEETS:
@@ -35,7 +39,7 @@ class EmployeeManager:
             try:
                 self.sheets_manager = GoogleSheetsManager()
             except Exception as e:
-                print(f"⚠️ Не удалось инициализировать Google Sheets: {e}")
+                logger.warning(f"Не удалось инициализировать Google Sheets: {e}")
         
         self._load_employees()
         self._load_pending_employees()
@@ -64,7 +68,7 @@ class EmployeeManager:
                         continue
                 return
             except Exception as e:
-                print(f"Ошибка загрузки сотрудников из Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка загрузки сотрудников из Google Sheets: {e}, используем файлы")
         
         # Загружаем из файла
         if not os.path.exists(EMPLOYEES_FILE):
@@ -100,7 +104,7 @@ class EmployeeManager:
                         self.employees[telegram_id] = (manual_name, telegram_name, username)
                         self.name_to_id[manual_name] = telegram_id
         except Exception as e:
-            print(f"Ошибка загрузки сотрудников: {e}")
+            logger.error(f"Ошибка загрузки сотрудников: {e}")
     
     def _save_employees(self):
         """Сохранить список сотрудников в файл или Google Sheets"""
@@ -115,7 +119,7 @@ class EmployeeManager:
                 self.sheets_manager.write_rows(SHEET_EMPLOYEES, rows, clear_first=True)
                 return
             except Exception as e:
-                print(f"Ошибка сохранения сотрудников в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения сотрудников в Google Sheets: {e}, используем файлы")
         
         # Сохраняем в файл
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -183,7 +187,7 @@ class EmployeeManager:
                         self.pending_employees[username] = manual_name
                 return
             except Exception as e:
-                print(f"Ошибка загрузки отложенных записей из Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка загрузки отложенных записей из Google Sheets: {e}, используем файлы")
         
         # Загружаем из файла
         if not os.path.exists(PENDING_EMPLOYEES_FILE):
@@ -201,7 +205,7 @@ class EmployeeManager:
                         manual_name = parts[1].strip()
                         self.pending_employees[username] = manual_name
         except Exception as e:
-            print(f"Ошибка загрузки отложенных записей: {e}")
+            logger.error(f"Ошибка загрузки отложенных записей: {e}")
     
     def _save_pending_employees(self):
         """Сохранить отложенные записи сотрудников"""
@@ -214,7 +218,7 @@ class EmployeeManager:
                 self.sheets_manager.write_rows(SHEET_PENDING_EMPLOYEES, rows, clear_first=True)
                 return
             except Exception as e:
-                print(f"Ошибка сохранения отложенных записей в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения отложенных записей в Google Sheets: {e}, используем файлы")
         
         # Сохраняем в файл
         os.makedirs(DATA_DIR, exist_ok=True)
@@ -334,7 +338,7 @@ class EmployeeManager:
                         # Оставляем последнюю запись для каждого ID (схлопывание)
                         all_entries[telegram_id] = (manual_name, telegram_name, username)
             except Exception as e:
-                print(f"Ошибка при схлопывании дубликатов: {e}")
+                logger.error(f"Ошибка при схлопывании дубликатов: {e}")
                 return
         
         # Обновляем внутренние структуры

@@ -2,8 +2,12 @@
 Управление администраторами
 """
 import os
+import logging
 from typing import List, Set
 from config import ADMINS_FILE, DATA_DIR, ADMIN_IDS, USE_GOOGLE_SHEETS, SHEET_ADMINS
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 # Импортируем Google Sheets Manager только если нужно
 if USE_GOOGLE_SHEETS:
@@ -27,7 +31,7 @@ class AdminManager:
             try:
                 self.sheets_manager = GoogleSheetsManager()
             except Exception as e:
-                print(f"⚠️ Не удалось инициализировать Google Sheets для админов: {e}")
+                logger.warning(f"Не удалось инициализировать Google Sheets для админов: {e}")
         
         self._load_admins()
     
@@ -51,7 +55,7 @@ class AdminManager:
                     self._save_admins()
                     return
             except Exception as e:
-                print(f"Ошибка загрузки администраторов из Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка загрузки администраторов из Google Sheets: {e}, используем файлы")
         
         # Загружаем из файла
         if not os.path.exists(ADMINS_FILE):
@@ -72,7 +76,7 @@ class AdminManager:
                     except ValueError:
                         continue
         except Exception as e:
-            print(f"Ошибка загрузки администраторов: {e}")
+            logger.error(f"Ошибка загрузки администраторов: {e}")
     
     def _save_admins(self):
         """Сохранить список администраторов в файл или Google Sheets"""
@@ -84,7 +88,7 @@ class AdminManager:
                     rows.append([str(admin_id)])
                 self.sheets_manager.write_rows(SHEET_ADMINS, rows, clear_first=True)
             except Exception as e:
-                print(f"Ошибка сохранения администраторов в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения администраторов в Google Sheets: {e}, используем файлы")
         
         # Сохраняем в файл
         os.makedirs(DATA_DIR, exist_ok=True)

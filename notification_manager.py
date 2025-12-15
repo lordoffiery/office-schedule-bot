@@ -2,6 +2,7 @@
 Управление уведомлениями и автоматическими задачами
 """
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import List
 from aiogram import Bot
@@ -9,6 +10,9 @@ from schedule_manager import ScheduleManager
 from employee_manager import EmployeeManager
 from config import REMINDER_HOUR, REMINDER_MINUTE, SCHEDULE_SEND_HOUR, SCHEDULE_SEND_MINUTE, TIMEZONE, MAX_OFFICE_SEATS
 import pytz
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 
 def day_to_short(day: str) -> str:
@@ -50,7 +54,7 @@ class NotificationManager:
             try:
                 await self.bot.send_message(telegram_id, message)
             except Exception as e:
-                print(f"Ошибка отправки напоминания {telegram_id}: {e}")
+                logger.error(f"Ошибка отправки напоминания {telegram_id}: {e}")
     
     async def send_weekly_schedule(self):
         """Отправить финальное расписание всем сотрудникам"""
@@ -89,7 +93,7 @@ class NotificationManager:
                             f"Вы автоматически добавлены в расписание на следующую неделю."
                         )
                     except Exception as e:
-                        print(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
+                        logger.error(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
         
         # Сохраняем финальное расписание (с учетом очереди)
         self.schedule_manager.save_schedule_for_week(next_week_start, schedule)
@@ -179,7 +183,7 @@ class NotificationManager:
             try:
                 await self.bot.send_message(telegram_id, message)
             except Exception as e:
-                print(f"Ошибка отправки расписания {telegram_id}: {e}")
+                logger.error(f"Ошибка отправки расписания {telegram_id}: {e}")
         
         # Очищаем заявки после отправки
         self.schedule_manager.clear_requests_for_week(next_week_start)
@@ -188,9 +192,9 @@ class NotificationManager:
         """Ежедневное схлопывание дубликатов сотрудников"""
         try:
             self.employee_manager.merge_duplicates()
-            print(f"[{datetime.now(self.timezone).strftime('%Y-%m-%d %H:%M:%S')}] Выполнено схлопывание дубликатов сотрудников")
+            logger.info(f"Выполнено схлопывание дубликатов сотрудников")
         except Exception as e:
-            print(f"Ошибка при схлопывании дубликатов: {e}")
+            logger.error(f"Ошибка при схлопывании дубликатов: {e}")
     
     async def check_and_send_reminders(self):
         """Проверять и отправлять напоминания в нужное время"""
@@ -223,7 +227,7 @@ class NotificationManager:
                 # Проверяем каждую минуту
                 await asyncio.sleep(60)
             except Exception as e:
-                print(f"Ошибка в check_and_send_reminders: {e}")
+                logger.error(f"Ошибка в check_and_send_reminders: {e}")
                 await asyncio.sleep(60)
     
     def start(self):
@@ -264,5 +268,5 @@ class NotificationManager:
                 try:
                     await self.bot.send_message(telegram_id, message)
                 except Exception as e:
-                    print(f"Ошибка отправки уведомления {telegram_id}: {e}")
+                    logger.error(f"Ошибка отправки уведомления {telegram_id}: {e}")
 

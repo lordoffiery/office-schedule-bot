@@ -2,11 +2,15 @@
 Модуль для инициализации данных при первом запуске
 """
 import os
+import logging
 from config import (
     DATA_DIR, SCHEDULES_DIR, REQUESTS_DIR, QUEUE_DIR,
     EMPLOYEES_FILE, ADMINS_FILE, DEFAULT_SCHEDULE_FILE,
     PENDING_EMPLOYEES_FILE, ADMIN_IDS, DEFAULT_SCHEDULE
 )
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 
 def init_data_directories():
@@ -22,7 +26,7 @@ def init_default_schedule():
         with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
             for day, employees in DEFAULT_SCHEDULE.items():
                 f.write(f"{day}: {', '.join(employees)}\n")
-        print(f"✅ Создан файл {DEFAULT_SCHEDULE_FILE}")
+        logger.info(f"Создан файл {DEFAULT_SCHEDULE_FILE}")
 
 
 def init_admins_file():
@@ -31,7 +35,7 @@ def init_admins_file():
         with open(ADMINS_FILE, 'w', encoding='utf-8') as f:
             for admin_id in ADMIN_IDS:
                 f.write(f"{admin_id}\n")
-        print(f"✅ Создан файл {ADMINS_FILE} с администраторами: {', '.join(map(str, ADMIN_IDS))}")
+        logger.info(f"Создан файл {ADMINS_FILE} с администраторами: {', '.join(map(str, ADMIN_IDS))}")
 
 
 def init_employees_file():
@@ -40,7 +44,7 @@ def init_employees_file():
         # Создаем пустой файл
         with open(EMPLOYEES_FILE, 'w', encoding='utf-8') as f:
             pass
-        print(f"✅ Создан пустой файл {EMPLOYEES_FILE}")
+        logger.info(f"Создан пустой файл {EMPLOYEES_FILE}")
 
 
 def init_pending_employees_file():
@@ -48,16 +52,16 @@ def init_pending_employees_file():
     if not os.path.exists(PENDING_EMPLOYEES_FILE):
         with open(PENDING_EMPLOYEES_FILE, 'w', encoding='utf-8') as f:
             pass
-        print(f"✅ Создан пустой файл {PENDING_EMPLOYEES_FILE}")
+        logger.info(f"Создан пустой файл {PENDING_EMPLOYEES_FILE}")
 
 
 def init_all():
     """Инициализировать все необходимые файлы и директории"""
-    print("🔧 Инициализация данных...")
+    logger.info("Инициализация данных...")
     init_data_directories()
     init_default_schedule()
     init_admins_file()
     init_employees_file()
     init_pending_employees_file()
-    print("✅ Инициализация данных завершена")
+    logger.info("Инициализация данных завершена")
 
