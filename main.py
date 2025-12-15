@@ -35,7 +35,7 @@ dp = Dispatcher(storage=storage)
 admin_manager = AdminManager()
 employee_manager = EmployeeManager()
 schedule_manager = ScheduleManager(employee_manager)
-notification_manager = NotificationManager(bot, schedule_manager, employee_manager)
+notification_manager = NotificationManager(bot, schedule_manager, employee_manager, admin_manager)
 
 timezone = pytz.timezone(TIMEZONE)
 
@@ -1076,8 +1076,8 @@ async def cmd_admin_test_schedule(message: Message):
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
     
     try:
-        await notification_manager.send_weekly_schedule()
-        response = "✅ Расписание успешно отправлено всем сотрудникам"
+        await notification_manager.send_weekly_schedule(admins_only=True)
+        response = "✅ Расписание успешно отправлено администраторам"
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
     except Exception as e:

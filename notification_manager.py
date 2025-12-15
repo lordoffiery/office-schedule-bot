@@ -8,6 +8,7 @@ from typing import List
 from aiogram import Bot
 from schedule_manager import ScheduleManager
 from employee_manager import EmployeeManager
+from admin_manager import AdminManager
 from config import REMINDER_HOUR, REMINDER_MINUTE, SCHEDULE_SEND_HOUR, SCHEDULE_SEND_MINUTE, TIMEZONE, MAX_OFFICE_SEATS
 import pytz
 
@@ -31,10 +32,11 @@ class NotificationManager:
     """Класс для управления уведомлениями"""
     
     def __init__(self, bot: Bot, schedule_manager: ScheduleManager, 
-                 employee_manager: EmployeeManager):
+                 employee_manager: EmployeeManager, admin_manager: AdminManager = None):
         self.bot = bot
         self.schedule_manager = schedule_manager
         self.employee_manager = employee_manager
+        self.admin_manager = admin_manager
         self.timezone = pytz.timezone(TIMEZONE)
         self.running = False
     
@@ -56,8 +58,8 @@ class NotificationManager:
             except Exception as e:
                 logger.error(f"Ошибка отправки напоминания {telegram_id}: {e}")
     
-    async def send_weekly_schedule(self):
-        """Отправить финальное расписание всем сотрудникам"""
+    async def send_weekly_schedule(self, admins_only: bool = False):
+        """Отправить финальное расписание всем сотрудникам или только админам"""
         now = datetime.now(self.timezone)
         next_week_start = self.schedule_manager.get_week_start(now + timedelta(days=7))
         
@@ -106,6 +108,14 @@ class NotificationManager:
         
         # Отправляем каждому сотруднику его расписание
         all_employees = self.employee_manager.get_all_employees()
+        
+        # Если нужно отправить только админам, фильтруем список
+        if admins_only and self.admin_manager:
+            filtered_employees = {}
+            for employee_name, telegram_id in all_employees.items():
+                if self.admin_manager.is_admin(telegram_id):
+                    filtered_employees[employee_name] = telegram_id
+            all_employees = filtered_employees
         
         # Получаем даты недели для определения расписания сотрудника
         week_dates = self.schedule_manager.get_week_dates(next_week_start)
