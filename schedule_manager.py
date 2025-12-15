@@ -423,10 +423,16 @@ class ScheduleManager:
         """Удалить сотрудника из очереди на дату"""
         date_str = date.strftime('%Y-%m-%d')
         
+        logger.info(f"Удаление из очереди: {date_str}, сотрудник: {employee_name}, ID: {telegram_id}")
+        
         queue = self.get_queue_for_date(date)
+        logger.info(f"Очередь до удаления: {len(queue)} записей")
+        
         # Удаляем сотрудника из очереди
         queue = [entry for entry in queue 
                 if not (entry['employee_name'] == employee_name and entry['telegram_id'] == telegram_id)]
+        
+        logger.info(f"Очередь после удаления: {len(queue)} записей")
         
         # Пробуем обновить в Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -435,27 +441,45 @@ class ScheduleManager:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_QUEUE)
                 if worksheet:
                     all_rows = worksheet.get_all_values()
+                    logger.info(f"Всего строк в Google Sheets: {len(all_rows)}")
+                    
                     # Пропускаем заголовок
                     start_idx = 1 if all_rows and all_rows[0][0] in ['date', 'date_str', 'Дата'] else 0
                     rows_to_keep = [all_rows[0]] if start_idx == 1 else []  # Сохраняем заголовок
-                    # Оставляем только записи не для этой даты или обновленные
+                    
+                    # Если заголовка нет, добавляем его
+                    if not rows_to_keep:
+                        rows_to_keep = [['date', 'employee_name', 'telegram_id']]
+                    
+                    # Оставляем только записи не для этой даты
                     for row in all_rows[start_idx:]:
-                        if len(row) >= 3 and row[0] != date_str:
+                        if len(row) >= 1 and row[0] != date_str:
                             rows_to_keep.append(row)
-                    # Добавляем обновленные записи для этой даты
+                    
+                    # Добавляем обновленные записи для этой даты (если очередь не пуста)
                     for entry in queue:
                         rows_to_keep.append([date_str, entry['employee_name'], str(entry['telegram_id'])])
-                    # Перезаписываем весь лист
-                    if rows_to_keep:
-                        self.sheets_manager.write_rows(SHEET_QUEUE, rows_to_keep, clear_first=True)
+                    
+                    logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets (включая заголовок)")
+                    # Перезаписываем весь лист (даже если очередь пуста - это удалит запись)
+                    self.sheets_manager.write_rows(SHEET_QUEUE, rows_to_keep, clear_first=True)
+                    logger.info(f"Очередь обновлена в Google Sheets")
             except Exception as e:
-                logger.warning(f"Ошибка обновления очереди в Google Sheets: {e}, используем файлы")
+                logger.error(f"Ошибка обновления очереди в Google Sheets: {e}", exc_info=True)
+        else:
+            logger.warning(f"Google Sheets не доступен для обновления очереди")
         
         # Сохраняем обновленную очередь в файл
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
-        with open(queue_file, 'w', encoding='utf-8') as f:
-            for entry in queue:
-                f.write(f"{entry['employee_name']}:{entry['telegram_id']}\n")
+        if queue:
+            with open(queue_file, 'w', encoding='utf-8') as f:
+                for entry in queue:
+                    f.write(f"{entry['employee_name']}:{entry['telegram_id']}\n")
+        else:
+            # Если очередь пуста, удаляем файл
+            if os.path.exists(queue_file):
+                os.remove(queue_file)
+                logger.info(f"Файл очереди {queue_file} удален (очередь пуста)")
     
     def process_queue_for_date(self, date: datetime, employee_manager) -> Optional[Dict]:
         """
