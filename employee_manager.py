@@ -3,7 +3,19 @@
 """
 import os
 from typing import Dict, Optional, List, Tuple
-from config import EMPLOYEES_FILE, DATA_DIR, PENDING_EMPLOYEES_FILE
+from config import (
+    EMPLOYEES_FILE, DATA_DIR, PENDING_EMPLOYEES_FILE,
+    USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES
+)
+
+# Импортируем Google Sheets Manager только если нужно
+if USE_GOOGLE_SHEETS:
+    try:
+        from google_sheets_manager import GoogleSheetsManager
+    except ImportError:
+        GoogleSheetsManager = None
+else:
+    GoogleSheetsManager = None
 
 
 class EmployeeManager:
@@ -16,11 +28,45 @@ class EmployeeManager:
         self.name_to_id: Dict[str, int] = {}
         # Отложенные записи: username -> manual_name (для случаев, когда админ добавляет по username до /start)
         self.pending_employees: Dict[str, str] = {}
+        
+        # Инициализируем Google Sheets Manager если нужно
+        self.sheets_manager = None
+        if USE_GOOGLE_SHEETS and GoogleSheetsManager:
+            try:
+                self.sheets_manager = GoogleSheetsManager()
+            except Exception as e:
+                print(f"⚠️ Не удалось инициализировать Google Sheets: {e}")
+        
         self._load_employees()
         self._load_pending_employees()
     
     def _load_employees(self):
-        """Загрузить список сотрудников из файла"""
+        """Загрузить список сотрудников из файла или Google Sheets"""
+        # Пробуем загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_EMPLOYEES)
+                # Пропускаем заголовок, если есть
+                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['manual_name', 'Имя вручную'] else 0
+                for row in rows[start_idx:]:
+                    if len(row) < 3 or not row[0] or not row[2]:
+                        continue
+                    try:
+                        manual_name = row[0].strip()
+                        telegram_name = row[1].strip() if len(row) > 1 and row[1].strip() else manual_name
+                        telegram_id = int(row[2].strip())
+                        username = row[3].strip() if len(row) > 3 and row[3].strip() else None
+                        
+                        if telegram_id not in self.employees:
+                            self.employees[telegram_id] = (manual_name, telegram_name, username)
+                            self.name_to_id[manual_name] = telegram_id
+                    except (ValueError, IndexError):
+                        continue
+                return
+            except Exception as e:
+                print(f"Ошибка загрузки сотрудников из Google Sheets: {e}, используем файлы")
+        
+        # Загружаем из файла
         if not os.path.exists(EMPLOYEES_FILE):
             os.makedirs(DATA_DIR, exist_ok=True)
             return
@@ -57,7 +103,21 @@ class EmployeeManager:
             print(f"Ошибка загрузки сотрудников: {e}")
     
     def _save_employees(self):
-        """Сохранить список сотрудников в файл"""
+        """Сохранить список сотрудников в файл или Google Sheets"""
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = [['manual_name', 'telegram_name', 'telegram_id', 'username']]  # Заголовок
+                for telegram_id in sorted(self.employees.keys()):
+                    manual_name, telegram_name, username = self.employees[telegram_id]
+                    username_str = username if username else ""
+                    rows.append([manual_name, telegram_name, str(telegram_id), username_str])
+                self.sheets_manager.write_rows(SHEET_EMPLOYEES, rows, clear_first=True)
+                return
+            except Exception as e:
+                print(f"Ошибка сохранения сотрудников в Google Sheets: {e}, используем файлы")
+        
+        # Сохраняем в файл
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(EMPLOYEES_FILE, 'w', encoding='utf-8') as f:
             for telegram_id in sorted(self.employees.keys()):
@@ -111,6 +171,21 @@ class EmployeeManager:
     
     def _load_pending_employees(self):
         """Загрузить отложенные записи сотрудников (username -> manual_name)"""
+        # Пробуем загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
+                start_idx = 1 if rows and len(rows) > 0 and rows[0][0] in ['username', 'Username'] else 0
+                for row in rows[start_idx:]:
+                    if len(row) >= 2 and row[0] and row[1]:
+                        username = row[0].strip().lower()
+                        manual_name = row[1].strip()
+                        self.pending_employees[username] = manual_name
+                return
+            except Exception as e:
+                print(f"Ошибка загрузки отложенных записей из Google Sheets: {e}, используем файлы")
+        
+        # Загружаем из файла
         if not os.path.exists(PENDING_EMPLOYEES_FILE):
             return
         
@@ -130,6 +205,18 @@ class EmployeeManager:
     
     def _save_pending_employees(self):
         """Сохранить отложенные записи сотрудников"""
+        # Пробуем сохранить в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = [['username', 'manual_name']]  # Заголовок
+                for username, manual_name in sorted(self.pending_employees.items()):
+                    rows.append([username, manual_name])
+                self.sheets_manager.write_rows(SHEET_PENDING_EMPLOYEES, rows, clear_first=True)
+                return
+            except Exception as e:
+                print(f"Ошибка сохранения отложенных записей в Google Sheets: {e}, используем файлы")
+        
+        # Сохраняем в файл
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(PENDING_EMPLOYEES_FILE, 'w', encoding='utf-8') as f:
             for username, manual_name in sorted(self.pending_employees.items()):

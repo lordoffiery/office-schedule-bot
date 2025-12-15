@@ -31,6 +31,20 @@ ADMINS_FILE = f'{DATA_DIR}/admins.txt'
 DEFAULT_SCHEDULE_FILE = f'{DATA_DIR}/default_schedule.txt'
 PENDING_EMPLOYEES_FILE = f'{DATA_DIR}/pending_employees.txt'
 
+# Google Sheets настройки (опционально)
+USE_GOOGLE_SHEETS = os.getenv('USE_GOOGLE_SHEETS', 'false').lower() == 'true'
+GOOGLE_SHEETS_ID = os.getenv('GOOGLE_SHEETS_ID', '')
+GOOGLE_SHEETS_CREDENTIALS = os.getenv('GOOGLE_SHEETS_CREDENTIALS', '')
+
+# Названия листов в Google Sheets
+SHEET_EMPLOYEES = 'employees'
+SHEET_ADMINS = 'admins'
+SHEET_DEFAULT_SCHEDULE = 'default_schedule'
+SHEET_PENDING_EMPLOYEES = 'pending_employees'
+SHEET_SCHEDULES = 'schedules'
+SHEET_REQUESTS = 'requests'
+SHEET_QUEUE = 'queue'
+
 # Максимальное количество мест в офисе
 MAX_OFFICE_SEATS = 8
 
