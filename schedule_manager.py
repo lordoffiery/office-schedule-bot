@@ -903,41 +903,29 @@ class ScheduleManager:
         return employee_schedule
     
     def update_employee_name_in_default_schedule(self, old_name: str, new_formatted_name: str):
-        """Обновить имя сотрудника в default_schedule.txt (заменить простое имя на форматированное)"""
-        if not os.path.exists(DEFAULT_SCHEDULE_FILE):
-            return
+        """Обновить имя сотрудника в default_schedule (заменить простое имя на форматированное)"""
+        # Загружаем текущее расписание
+        schedule = self.load_default_schedule()
         
-        try:
-            # Читаем файл
-            with open(DEFAULT_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-            
-            # Обновляем строки
-            updated_lines = []
-            for line in lines:
-                line = line.rstrip('\n')
-                # Если это строка с именами сотрудников
-                if line and line not in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                    # Разбиваем на имена
-                    employees = [e.strip() for e in line.split(',')]
-                    updated_employees = []
-                    for emp in employees:
-                        # Извлекаем простое имя из отформатированного (если есть)
-                        plain_name = self.get_plain_name_from_formatted(emp)
-                        # Если простое имя совпадает с old_name, заменяем на новое форматированное
-                        if plain_name == old_name:
-                            updated_employees.append(new_formatted_name)
-                        else:
-                            updated_employees.append(emp)
-                    updated_lines.append(', '.join(updated_employees) + '\n')
+        # Обновляем имена в расписании
+        updated = False
+        for day_name in schedule:
+            employees = schedule[day_name]
+            updated_employees = []
+            for emp in employees:
+                # Извлекаем простое имя из отформатированного (если есть)
+                plain_name = self.get_plain_name_from_formatted(emp)
+                # Если простое имя совпадает с old_name, заменяем на новое форматированное
+                if plain_name == old_name:
+                    updated_employees.append(new_formatted_name)
+                    updated = True
                 else:
-                    updated_lines.append(line + '\n')
-            
-            # Записываем обратно
-            with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
-                f.writelines(updated_lines)
-        except Exception as e:
-            logger.error(f"Ошибка обновления имени в default_schedule.txt: {e}")
+                    updated_employees.append(emp)
+            schedule[day_name] = updated_employees
+        
+        # Если были изменения, сохраняем обновленное расписание
+        if updated:
+            self.save_default_schedule(schedule)
     
     def _update_all_employee_names_in_default_schedule(self):
         """Обновить все имена сотрудников в default_schedule.txt при старте бота"""

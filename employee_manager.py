@@ -356,44 +356,14 @@ class EmployeeManager:
     
     def merge_duplicates(self):
         """Схлопнуть дубликаты по telegram_id (оставить последнюю запись для каждого ID)"""
-        # Загружаем все записи из файла (включая дубликаты)
-        all_entries = {}
-        if os.path.exists(EMPLOYEES_FILE):
-            try:
-                with open(EMPLOYEES_FILE, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line or ':' not in line:
-                            continue
-                        
-                        parts = line.split(':')
-                        # Поддержка старого и нового формата
-                        if len(parts) == 2:
-                            # Старый формат: имя:telegram_id
-                            manual_name = parts[0].strip()
-                            telegram_id = int(parts[1].strip())
-                            telegram_name = manual_name
-                            username = None
-                        elif len(parts) >= 3:
-                            # Новый формат: имя_вручную:имя_телеги:telegram_id:никнейм
-                            manual_name = parts[0].strip()
-                            telegram_name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else manual_name
-                            telegram_id = int(parts[2].strip())
-                            username = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
-                        else:
-                            continue
-                        
-                        # Оставляем последнюю запись для каждого ID (схлопывание)
-                        all_entries[telegram_id] = (manual_name, telegram_name, username)
-            except Exception as e:
-                logger.error(f"Ошибка при схлопывании дубликатов: {e}")
-                return
+        # Используем текущие данные из памяти (которые уже загружены из Google Sheets или файла)
+        # Схлопываем дубликаты - оставляем последнюю запись для каждого telegram_id
+        # (в словаре уже хранится последняя запись для каждого ID, так что просто сохраняем)
         
-        # Обновляем внутренние структуры
-        self.employees = all_entries
+        # Обновляем индекс name_to_id на основе текущих данных
         self.name_to_id = {}
         for telegram_id, (manual_name, _, _) in self.employees.items():
             self.name_to_id[manual_name] = telegram_id
         
-        # Сохраняем схлопнутые данные
+        # Сохраняем схлопнутые данные (это обновит и Google Sheets, и файл)
         self._save_employees()
