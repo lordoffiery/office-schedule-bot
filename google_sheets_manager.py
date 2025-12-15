@@ -18,9 +18,20 @@ class GoogleSheetsManager:
     
     def _init_client(self):
         """Инициализировать клиент Google Sheets"""
-        # Получаем credentials из переменной окружения
+        # Получаем credentials из переменной окружения или файла
         credentials_json = os.getenv('GOOGLE_SHEETS_CREDENTIALS')
         spreadsheet_id = os.getenv('GOOGLE_SHEETS_ID')
+        credentials_file = os.getenv('GOOGLE_CREDENTIALS_FILE', 'google_credentials.json')
+        
+        # Если нет переменных окружения, пробуем использовать файл
+        if not credentials_json:
+            if os.path.exists(credentials_file):
+                try:
+                    with open(credentials_file, 'r') as f:
+                        credentials_dict = json.load(f)
+                    credentials_json = json.dumps(credentials_dict)
+                except Exception as e:
+                    print(f"⚠️ Не удалось прочитать файл credentials: {e}")
         
         if not credentials_json or not spreadsheet_id:
             print("⚠️ Google Sheets не настроен. Используются локальные файлы.")
@@ -28,7 +39,11 @@ class GoogleSheetsManager:
         
         try:
             # Парсим JSON credentials
-            credentials_dict = json.loads(credentials_json)
+            if isinstance(credentials_json, str):
+                credentials_dict = json.loads(credentials_json)
+            else:
+                credentials_dict = credentials_json
+            
             scopes = [
                 'https://www.googleapis.com/auth/spreadsheets',
                 'https://www.googleapis.com/auth/drive'
@@ -36,7 +51,7 @@ class GoogleSheetsManager:
             creds = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
             self.client = gspread.authorize(creds)
             self.spreadsheet = self.client.open_by_key(spreadsheet_id)
-            print("✅ Google Sheets подключен")
+            print(f"✅ Google Sheets подключен (ID: {spreadsheet_id})")
         except Exception as e:
             print(f"❌ Ошибка подключения к Google Sheets: {e}")
             self.client = None

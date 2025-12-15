@@ -22,6 +22,7 @@ data/
 
 # Config
 .env
+google_credentials.json
 
 # OS
 .DS_Store

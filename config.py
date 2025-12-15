@@ -32,9 +32,10 @@ DEFAULT_SCHEDULE_FILE = f'{DATA_DIR}/default_schedule.txt'
 PENDING_EMPLOYEES_FILE = f'{DATA_DIR}/pending_employees.txt'
 
 # Google Sheets настройки (опционально)
-USE_GOOGLE_SHEETS = os.getenv('USE_GOOGLE_SHEETS', 'false').lower() == 'true'
-GOOGLE_SHEETS_ID = os.getenv('GOOGLE_SHEETS_ID', '')
+USE_GOOGLE_SHEETS = os.getenv('USE_GOOGLE_SHEETS', 'true').lower() == 'true'  # По умолчанию включено
+GOOGLE_SHEETS_ID = os.getenv('GOOGLE_SHEETS_ID', '13zmdoS160B5Hn0Cl-q2hNrEgyZVc6Jh0JaxUnI9jSFg')  # ID из URL
 GOOGLE_SHEETS_CREDENTIALS = os.getenv('GOOGLE_SHEETS_CREDENTIALS', '')
+GOOGLE_CREDENTIALS_FILE = os.getenv('GOOGLE_CREDENTIALS_FILE', 'google_credentials.json')
 
 # Названия листов в Google Sheets
 SHEET_EMPLOYEES = 'employees'
