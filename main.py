@@ -3,6 +3,7 @@
 """
 import asyncio
 import os
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from aiogram import Bot, Dispatcher
@@ -20,6 +21,9 @@ from admin_manager import AdminManager
 from logger import log_command
 from init_data import init_all
 import pytz
+
+# Настройка логирования
+logger = logging.getLogger(__name__)
 
 
 # Инициализация
