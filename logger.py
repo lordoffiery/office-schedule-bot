@@ -55,6 +55,7 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
     log_message = f"{user_info} | Команда: {command} | Ответ: {response_short}"
     
     # Логируем только в Google Sheets (не в файл, чтобы не занимать место в памяти Railway)
+    # Используем низкий приоритет, чтобы не блокировать важные данные
     if sheets_manager and sheets_manager.is_available():
         try:
             # Формируем строку для таблицы: [timestamp, user_id, username, first_name, command, response]
@@ -67,7 +68,9 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
                 command,
                 response_short
             ]
-            sheets_manager.append_row(SHEET_LOGS, row)
+            # Используем PRIORITY_LOW для логов - они будут пропущены при превышении лимита API
+            from google_sheets_manager import PRIORITY_LOW
+            sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
         except Exception as e:
             # Не прерываем работу, если не удалось записать в Google Sheets
             # Используем стандартный logger для ошибок
