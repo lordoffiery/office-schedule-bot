@@ -12,6 +12,7 @@ ENV/
 # Data files
 data/
 *.txt
+!requirements.txt
 
 # IDE
 .idea/

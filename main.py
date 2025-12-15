@@ -17,6 +17,7 @@ from employee_manager import EmployeeManager
 from schedule_manager import ScheduleManager
 from notification_manager import NotificationManager
 from admin_manager import AdminManager
+from logger import log_command
 import pytz
 
 
@@ -32,6 +33,16 @@ schedule_manager = ScheduleManager(employee_manager)
 notification_manager = NotificationManager(bot, schedule_manager, employee_manager)
 
 timezone = pytz.timezone(TIMEZONE)
+
+
+# Вспомогательная функция для логирования команд
+def get_user_info(message: Message):
+    """Получить информацию о пользователе для логирования"""
+    return {
+        'user_id': message.from_user.id,
+        'username': message.from_user.username,
+        'first_name': message.from_user.first_name or "Пользователь"
+    }
 
 
 # FSM состояния
@@ -97,25 +108,30 @@ async def cmd_start(message: Message):
     """Команда /start"""
     user_id = message.from_user.id
     user_name = message.from_user.first_name or "Пользователь"
+    username = message.from_user.username
     
     # Регистрируем пользователя, если его еще нет
-    username = message.from_user.username
     was_registered = employee_manager.is_registered(user_id)
     employee_manager.register_user(user_id, user_name, username)
     
     if not was_registered:
-        await message.reply(
+        response = (
             f"Привет, {user_name}! Я бот для управления расписанием сотрудников.\n\n"
             "Используйте /help для списка команд."
         )
     else:
-        await message.reply("Вы уже зарегистрированы! Используйте /help для списка команд.")
+        response = "Вы уже зарегистрированы! Используйте /help для списка команд."
+    
+    await message.reply(response)
+    log_command(user_id, username, user_name, "/start", response)
 
 
 @dp.message(Command("help"))
 async def cmd_help(message: Message):
     """Команда /help"""
     user_id = message.from_user.id
+    username = message.from_user.username
+    first_name = message.from_user.first_name or "Пользователь"
     is_admin = admin_manager.is_admin(user_id)
     
     help_text = (
@@ -150,6 +166,7 @@ async def cmd_help(message: Message):
         )
     
     await message.reply(help_text)
+    log_command(user_id, username, first_name, "/help", help_text[:200])
 
 
 @dp.message(Command("set_week_days"))
@@ -157,23 +174,31 @@ async def cmd_set_week_days(message: Message, state: FSMContext):
     """Команда для установки дней на следующую неделю (поддерживает даты и названия дней)"""
     user_id = message.from_user.id
     
+    user_info = get_user_info(message)
+    
     if not employee_manager.is_registered(user_id):
-        await message.reply("Вы не зарегистрированы. Используйте /start")
+        response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", response)
         return
     
     employee_name = employee_manager.get_employee_name(user_id)
     if not employee_name:
-        await message.reply("Ошибка: не найдено ваше имя в системе")
+        response = "Ошибка: не найдено ваше имя в системе"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", response)
         return
     
     # Парсим аргументы из команды
     command_parts = message.text.split()
     if len(command_parts) < 2:
-        await message.reply(
+        response = (
             "Укажите дни недели. Например:\n"
             "/set_week_days 2024-12-23 2024-12-24 2024-12-26\n"
             "или: /set_week_days пн вт чт"
         )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", response)
         return
     
     # Получаем начало следующей недели
@@ -210,12 +235,14 @@ async def cmd_set_week_days(message: Message, state: FSMContext):
         days = parse_weekdays(days_text)
         
         if not days:
-            await message.reply(
+            response = (
                 "Не удалось распознать дни. Используйте формат:\n"
                 "/set_week_days 2024-12-23 2024-12-24 2024-12-26\n"
                 "или: /set_week_days пн вт чт\n"
                 "или: /set_week_days понедельник вторник четверг"
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", response)
             return
     
     # Определяем, какие дни нужно пропустить (если есть в расписании по умолчанию)
@@ -290,20 +317,26 @@ async def cmd_set_week_days(message: Message, state: FSMContext):
     message_text += f"\nФинальное расписание будет отправлено в воскресенье вечером."
     
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", message_text)
 
 
 @dp.message(Command("my_schedule"))
 async def cmd_my_schedule(message: Message):
     """Показать расписание сотрудника на текущую неделю"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not employee_manager.is_registered(user_id):
-        await message.reply("Вы не зарегистрированы. Используйте /start")
+        response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", response)
         return
     
     employee_name = employee_manager.get_employee_name(user_id)
     if not employee_name:
-        await message.reply("Ошибка: не найдено ваше имя в системе")
+        response = "Ошибка: не найдено ваше имя в системе"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", response)
         return
     
     # Получаем начало текущей недели
@@ -342,6 +375,7 @@ async def cmd_my_schedule(message: Message):
     
     message_text = format_schedule_message(employee_schedule, current_week_start)
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", message_text)
 
 
 async def process_skip_day(date: datetime, employee_name: str, user_id: int, employee_manager, schedule_manager, notification_manager, bot, timezone):
@@ -463,20 +497,27 @@ async def process_skip_day(date: datetime, employee_name: str, user_id: int, emp
 async def cmd_skip_day(message: Message):
     """Пропустить день (можно указать несколько дат через пробел)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not employee_manager.is_registered(user_id):
-        await message.reply("Вы не зарегистрированы. Используйте /start")
+        response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", response)
         return
     
     employee_name = employee_manager.get_employee_name(user_id)
     if not employee_name:
-        await message.reply("Ошибка: не найдено ваше имя в системе")
+        response = "Ошибка: не найдено ваше имя в системе"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", response)
         return
     
     # Парсим даты из команды
     command_parts = message.text.split()
     if len(command_parts) < 2:
-        await message.reply("Укажите дату(ы). Например: /skip_day 2024-12-20 или /skip_day 2024-12-20 2024-12-21")
+        response = "Укажите дату(ы). Например: /skip_day 2024-12-20 или /skip_day 2024-12-20 2024-12-21"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", response)
         return
     
     # Парсим все даты
@@ -487,7 +528,9 @@ async def cmd_skip_day(message: Message):
             date = timezone.localize(date)
             dates.append(date)
         except ValueError:
-            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            response = f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", response)
             return
     
     # Обрабатываем каждую дату
@@ -499,6 +542,7 @@ async def cmd_skip_day(message: Message):
     # Формируем ответ
     message_text = "\n\n".join(results)
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", message_text)
 
 
 async def process_add_day(date: datetime, employee_name: str, user_id: int, employee_manager, schedule_manager, timezone):
@@ -595,20 +639,27 @@ async def process_add_day(date: datetime, employee_name: str, user_id: int, empl
 async def cmd_add_day(message: Message):
     """Запросить дополнительный день (можно указать несколько дат через пробел)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not employee_manager.is_registered(user_id):
-        await message.reply("Вы не зарегистрированы. Используйте /start")
+        response = "Вы не зарегистрированы. Используйте /start"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", response)
         return
     
     employee_name = employee_manager.get_employee_name(user_id)
     if not employee_name:
-        await message.reply("Ошибка: не найдено ваше имя в системе")
+        response = "Ошибка: не найдено ваше имя в системе"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", response)
         return
     
     # Парсим даты из команды
     command_parts = message.text.split()
     if len(command_parts) < 2:
-        await message.reply("Укажите дату(ы). Например: /add_day 2024-12-20 или /add_day 2024-12-20 2024-12-21")
+        response = "Укажите дату(ы). Например: /add_day 2024-12-20 или /add_day 2024-12-20 2024-12-21"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", response)
         return
     
     # Парсим все даты
@@ -619,7 +670,9 @@ async def cmd_add_day(message: Message):
             date = timezone.localize(date)
             dates.append(date)
         except ValueError:
-            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            response = f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", response)
             return
     
     # Обрабатываем каждую дату
@@ -631,15 +684,19 @@ async def cmd_add_day(message: Message):
     # Формируем ответ
     message_text = "\n\n".join(results)
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", message_text)
 
 
 @dp.message(Command("full_schedule"))
 async def cmd_full_schedule(message: Message):
     """Показать полное расписание на дату (только для админов)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", response)
         return
     
     # Парсим дату из команды
@@ -649,7 +706,9 @@ async def cmd_full_schedule(message: Message):
             date = datetime.strptime(command_parts[1], "%Y-%m-%d")
             date = timezone.localize(date)
         except:
-            await message.reply("Неверный формат даты. Используйте: /full_schedule 2024-12-20")
+            response = "Неверный формат даты. Используйте: /full_schedule 2024-12-20"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", response)
             return
     else:
         date = datetime.now(timezone)
@@ -684,15 +743,19 @@ async def cmd_full_schedule(message: Message):
         message_text += f"{day}: {', '.join(employees)}\n"
     
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", message_text[:200])
 
 
 @dp.message(Command("admin_add_employee"))
 async def cmd_admin_add_employee(message: Message):
     """Добавить сотрудника (только для админов)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
         return
     
     # Проверяем, есть ли reply на сообщение пользователя
@@ -730,7 +793,7 @@ async def cmd_admin_add_employee(message: Message):
     # Извлекаем имя - всё после команды до username или до конца
     command_parts = text_without_username.split(maxsplit=1)
     if len(command_parts) < 2:
-        await message.reply(
+        response = (
             "Используйте один из форматов:\n\n"
             "1. Ответьте на сообщение пользователя:\n"
             "   /admin_add_employee [имя]\n\n"
@@ -741,6 +804,8 @@ async def cmd_admin_add_employee(message: Message):
             "4. Укажите telegram_id и username:\n"
             "   /admin_add_employee [имя] [telegram_id] @username"
         )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
         return
     
     name = command_parts[1].strip()
@@ -752,10 +817,12 @@ async def cmd_admin_add_employee(message: Message):
             username = username_in_text
             # Сохраняем отложенную запись для использования при /start
             employee_manager.add_pending_employee(username, name)
-            await message.reply(
+            response = (
                 f"✅ Отложенная запись для сотрудника {name} (@{username}) сохранена.\n\n"
                 f"Попросите @{username} написать боту /start - он будет автоматически добавлен с именем '{name}'."
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
             return
         else:
             # Проверяем, может быть указан ID после имени
@@ -765,16 +832,20 @@ async def cmd_admin_add_employee(message: Message):
                 try:
                     telegram_id = int(remaining_parts[2])
                 except (ValueError, IndexError):
-                    await message.reply(
+                    response = (
                         "Укажите username или ответьте на сообщение пользователя:\n"
                         "/admin_add_employee [имя] @username"
                     )
+                    await message.reply(response)
+                    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
                     return
             else:
-                await message.reply(
+                response = (
                     "Укажите username или ответьте на сообщение пользователя:\n"
                     "/admin_add_employee [имя] @username"
                 )
+                await message.reply(response)
+                log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
                 return
     
     # Если у нас есть ID, добавляем сотрудника
@@ -826,27 +897,36 @@ async def cmd_admin_add_employee(message: Message):
             schedule_manager.update_employee_name_in_default_schedule(name, formatted_name)
             
             username_display = f" (@{username})" if username else ""
-            await message.reply(
+            response = (
                 f"✅ Сотрудник {name}{username_display} добавлен\n"
                 f"Telegram ID: {telegram_id}"
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
         else:
             existing_id = employee_manager.get_employee_id(name)
-            await message.reply(
+            response = (
                 f"❌ Сотрудник {name} уже существует\n"
                 f"Текущий Telegram ID: {existing_id}"
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
     else:
-        await message.reply("Не удалось определить Telegram ID пользователя")
+        response = "Не удалось определить Telegram ID пользователя"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
 
 
 @dp.message(Command("admin_add_admin"))
 async def cmd_admin_add_admin(message: Message):
     """Добавить администратора (только для админов)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
         return
     
     # Проверяем, есть ли reply на сообщение пользователя
@@ -881,7 +961,7 @@ async def cmd_admin_add_admin(message: Message):
                 if found_id:
                     telegram_id = found_id
                 else:
-                    await message.reply(
+                    response = (
                         f"❌ Пользователь @{username} не найден в списке сотрудников.\n\n"
                         f"Сначала добавьте сотрудника командой:\n"
                         f"/admin_add_employee [имя] @{username}\n\n"
@@ -891,9 +971,11 @@ async def cmd_admin_add_admin(message: Message):
                         f"2. Укажите telegram_id:\n"
                         f"   /admin_add_admin [telegram_id]"
                     )
+                    await message.reply(response)
+                    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
                     return
         else:
-            await message.reply(
+            response = (
                 "Используйте один из форматов:\n\n"
                 "1. Ответьте на сообщение пользователя:\n"
                 "   /admin_add_admin\n\n"
@@ -902,38 +984,51 @@ async def cmd_admin_add_admin(message: Message):
                 "3. Укажите telegram_id:\n"
                 "   /admin_add_admin [telegram_id]"
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
             return
     
     # Если у нас есть ID, добавляем администратора
     if telegram_id:
         if admin_manager.add_admin(telegram_id):
             username_display = f" (@{username})" if username else ""
-            await message.reply(
+            response = (
                 f"✅ Администратор{username_display} добавлен\n"
                 f"Telegram ID: {telegram_id}"
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
         else:
-            await message.reply(
+            response = (
                 f"❌ Пользователь уже является администратором\n"
                 f"Telegram ID: {telegram_id}"
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
     else:
-        await message.reply("Не удалось определить Telegram ID пользователя")
+        response = "Не удалось определить Telegram ID пользователя"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
 
 
 @dp.message(Command("admin_list_admins"))
 async def cmd_admin_list_admins(message: Message):
     """Показать список администраторов (только для админов)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_list_admins", response)
         return
     
     admins = admin_manager.get_all_admins()
     
     if not admins:
-        await message.reply("Список администраторов пуст")
+        response = "Список администраторов пуст"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_list_admins", response)
         return
     
     message_text = "👑 Список администраторов:\n\n"
@@ -950,44 +1045,59 @@ async def cmd_admin_list_admins(message: Message):
             message_text += f"• {admin_id}\n"
     
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_list_admins", message_text)
 
 
 @dp.message(Command("admin_test_schedule"))
 async def cmd_admin_test_schedule(message: Message):
     """Тестовая команда для отправки расписания (только для админов)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
         return
     
-    await message.reply("📤 Начинаю рассылку расписания на следующую неделю...")
+    response = "📤 Начинаю рассылку расписания на следующую неделю..."
+    await message.reply(response)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
     
     try:
         await notification_manager.send_weekly_schedule()
-        await message.reply("✅ Расписание успешно отправлено всем сотрудникам")
+        response = "✅ Расписание успешно отправлено всем сотрудникам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
     except Exception as e:
-        await message.reply(f"❌ Ошибка при отправке расписания: {e}")
+        response = f"❌ Ошибка при отправке расписания: {e}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_test_schedule", response)
 
 
 @dp.message(Command("admin_skip_day"))
 async def cmd_admin_skip_day(message: Message):
     """Пропустить день для сотрудника (только для админов, можно указать несколько дат)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", response)
         return
     
     # Парсим команду: /admin_skip_day @username date1 date2 ...
     command_parts = message.text.split()
     if len(command_parts) < 3:
-        await message.reply(
+        response = (
             "Используйте формат:\n"
             "/admin_skip_day @username 2024-12-20\n"
             "или\n"
             "/admin_skip_day @username 2024-12-20 2024-12-21"
         )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", response)
         return
     
     # Ищем username (начинается с @)
@@ -1000,18 +1110,24 @@ async def cmd_admin_skip_day(message: Message):
             break
     
     if not username:
-        await message.reply("Укажите username сотрудника (начинается с @). Например: /admin_skip_day @username 2024-12-20")
+        response = "Укажите username сотрудника (начинается с @). Например: /admin_skip_day @username 2024-12-20"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", response)
         return
     
     # Находим telegram_id по username
     target_telegram_id = employee_manager.get_telegram_id_by_username(username)
     if not target_telegram_id:
-        await message.reply(f"❌ Сотрудник @{username} не найден в системе")
+        response = f"❌ Сотрудник @{username} не найден в системе"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", response)
         return
     
     target_employee_name = employee_manager.get_employee_name(target_telegram_id)
     if not target_employee_name:
-        await message.reply(f"❌ Не найдено имя сотрудника @{username}")
+        response = f"❌ Не найдено имя сотрудника @{username}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", response)
         return
     
     # Парсим даты
@@ -1022,7 +1138,9 @@ async def cmd_admin_skip_day(message: Message):
             date = timezone.localize(date)
             dates.append(date)
         except ValueError:
-            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            response = f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", response)
             return
     
     # Обрабатываем каждую дату
@@ -1034,26 +1152,32 @@ async def cmd_admin_skip_day(message: Message):
     # Формируем ответ
     message_text = f"👤 Сотрудник: @{username}\n\n" + "\n\n".join(results)
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", message_text)
 
 
 @dp.message(Command("admin_add_day"))
 async def cmd_admin_add_day(message: Message):
     """Добавить день для сотрудника (только для админов, можно указать несколько дат)"""
     user_id = message.from_user.id
+    user_info = get_user_info(message)
     
     if not admin_manager.is_admin(user_id):
-        await message.reply("Эта команда доступна только администраторам")
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", response)
         return
     
     # Парсим команду: /admin_add_day @username date1 date2 ...
     command_parts = message.text.split()
     if len(command_parts) < 3:
-        await message.reply(
+        response = (
             "Используйте формат:\n"
             "/admin_add_day @username 2024-12-20\n"
             "или\n"
             "/admin_add_day @username 2024-12-20 2024-12-21"
         )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", response)
         return
     
     # Ищем username (начинается с @)
@@ -1066,18 +1190,24 @@ async def cmd_admin_add_day(message: Message):
             break
     
     if not username:
-        await message.reply("Укажите username сотрудника (начинается с @). Например: /admin_add_day @username 2024-12-20")
+        response = "Укажите username сотрудника (начинается с @). Например: /admin_add_day @username 2024-12-20"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", response)
         return
     
     # Находим telegram_id по username
     target_telegram_id = employee_manager.get_telegram_id_by_username(username)
     if not target_telegram_id:
-        await message.reply(f"❌ Сотрудник @{username} не найден в системе")
+        response = f"❌ Сотрудник @{username} не найден в системе"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", response)
         return
     
     target_employee_name = employee_manager.get_employee_name(target_telegram_id)
     if not target_employee_name:
-        await message.reply(f"❌ Не найдено имя сотрудника @{username}")
+        response = f"❌ Не найдено имя сотрудника @{username}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", response)
         return
     
     # Парсим даты
@@ -1088,7 +1218,9 @@ async def cmd_admin_add_day(message: Message):
             date = timezone.localize(date)
             dates.append(date)
         except ValueError:
-            await message.reply(f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD")
+            response = f"Неверный формат даты: {date_str}. Используйте формат: YYYY-MM-DD"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", response)
             return
     
     # Обрабатываем каждую дату
@@ -1100,6 +1232,7 @@ async def cmd_admin_add_day(message: Message):
     # Формируем ответ
     message_text = f"👤 Сотрудник: @{username}\n\n" + "\n\n".join(results)
     await message.reply(message_text)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", message_text)
 
 
 # Обработка текстовых сообщений (для ответов на напоминания)
@@ -1157,11 +1290,14 @@ async def handle_text_message(message: Message):
                 days_to_request, days_to_skip
             )
             
-            await message.reply(
+            user_info = get_user_info(message)
+            response = (
                 f"✅ Ваши дни на следующую неделю сохранены:\n"
                 f"В офисе: {', '.join([day_to_short(d) for d in days])}\n\n"
                 f"Финальное расписание будет отправлено в воскресенье вечером."
             )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "текстовое сообщение (дни недели)", response)
 
 
 # Запуск бота
