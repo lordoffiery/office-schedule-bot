@@ -1427,8 +1427,18 @@ async def main():
     notification_manager.start()
     
     # Удаляем вебхук и запускаем polling
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Вебхук удален, запускаем polling...")
+    except Exception as e:
+        logger.warning(f"Не удалось удалить вебхук (возможно, его не было): {e}")
+    
+    # Запускаем polling с обработкой ошибок
+    try:
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except Exception as e:
+        logger.error(f"Критическая ошибка при запуске polling: {e}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
