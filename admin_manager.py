@@ -36,6 +36,10 @@ class AdminManager:
         
         self._load_admins()
     
+    def reload_admins(self):
+        """Перезагрузить список администраторов из Google Sheets или файла"""
+        self._load_admins()
+    
     def _load_admins(self):
         """Загрузить список администраторов из Google Sheets (приоритет) или файла"""
         # Начинаем с админов из config, но они будут дополнены/заменены данными из Google Sheets
