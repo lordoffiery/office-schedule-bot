@@ -138,12 +138,14 @@ def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -
             # Сортируем по номеру места (1.1, 1.2, 1.3...)
             employees_with_places.sort(key=lambda x: parse_place_key(x[0]))
             
-            # Форматируем отсортированный список
-            formatted_list = [f"{place}: {emp}" for place, emp in employees_with_places]
-            result.append(f"{day}: {', '.join(formatted_list)}")
+            # Форматируем отсортированный список - каждый сотрудник на отдельной строке
+            day_lines = [f"{day}:"]
+            for place, emp in employees_with_places:
+                day_lines.append(f"  {place}: {emp}")
+            result.append("\n".join(day_lines))
         else:
             result.append(f"{day}: (пусто)")
-    return "\n".join(result)
+    return "\n\n".join(result)
 
 
 def format_schedule_message(employee_schedule: dict, week_start: datetime) -> str:
