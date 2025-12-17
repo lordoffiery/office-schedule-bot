@@ -300,6 +300,18 @@ class GoogleSheetsManager:
         self.operation_buffer.append(buffered_op)
         logger.debug(f"Операция {operation_type.value} для {worksheet_name} добавлена в буфер (размер: {len(self.operation_buffer)})")
     
+    def has_buffered_operations_for_sheet(self, worksheet_name: str) -> bool:
+        """
+        Проверить, есть ли буферизованные операции для указанного листа
+        
+        Args:
+            worksheet_name: Имя листа
+            
+        Returns:
+            True если есть буферизованные операции для этого листа, False иначе
+        """
+        return any(op.worksheet_name == worksheet_name for op in self.operation_buffer)
+    
     async def _flush_operation_buffer(self):
         """
         Периодическая задача для отправки буферизованных операций
