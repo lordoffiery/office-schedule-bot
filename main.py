@@ -940,6 +940,25 @@ async def cmd_admin_add_employee(message: Message):
                 # Удаляем отложенную запись, так как пользователь теперь добавлен
                 employee_manager.remove_pending_employee(username)
         
+        # Проверяем, не используется ли имя другим сотрудником
+        existing_id = employee_manager.get_employee_id(name)
+        if existing_id and existing_id != telegram_id:
+            # Имя уже используется другим сотрудником
+            existing_employee_data = employee_manager.get_employee_data(existing_id)
+            existing_username = ""
+            if existing_employee_data:
+                _, _, existing_username = existing_employee_data
+            username_display = f" (@{existing_username})" if existing_username else ""
+            response = (
+                f"❌ Имя '{name}' уже используется другим сотрудником.\n\n"
+                f"Текущий владелец имени:\n"
+                f"• Telegram ID: {existing_id}{username_display}\n\n"
+                f"💡 Используйте другое имя для нового сотрудника."
+            )
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
+            return
+        
         if employee_manager.add_employee(name, telegram_id, telegram_name, username):
             # Обновляем имя в default_schedule.txt, если сотрудник там есть
             formatted_name = employee_manager.format_employee_name_by_id(telegram_id)
@@ -953,6 +972,7 @@ async def cmd_admin_add_employee(message: Message):
             await message.reply(response)
             log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
         else:
+            # Этот случай не должен произойти, так как мы уже проверили выше
             existing_id = employee_manager.get_employee_id(name)
             response = (
                 f"❌ Сотрудник {name} уже существует\n"
