@@ -1,9 +1,12 @@
 """
 Модуль для логирования команд бота
 Логи пишутся только в Google Sheets, чтобы не занимать место в памяти Railway
+Несохраненные логи буферизуются и отправляются позже
 """
 import logging
+import asyncio
 from datetime import datetime
+from collections import deque
 from config import TIMEZONE, USE_GOOGLE_SHEETS, SHEET_LOGS
 import pytz
 
@@ -24,6 +27,12 @@ if USE_GOOGLE_SHEETS:
 # Создаем logger (без файлового handler, чтобы не занимать место)
 logger = logging.getLogger('bot_logger')
 logger.setLevel(logging.INFO)
+
+# Буфер для несохраненных логов (из-за ошибок API)
+# Формат: deque([(timestamp, user_id, username, first_name, command, response), ...])
+_log_buffer = deque(maxlen=1000)  # Максимум 1000 записей в буфере
+_last_retry_time = 0  # Время последней попытки отправки буфера
+_RETRY_INTERVAL = 60  # Интервал повторной попытки в секундах
 
 
 def log_command(user_id: int, username: str, first_name: str, command: str, response: str):
@@ -54,25 +63,29 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
     
     log_message = f"{user_info} | Команда: {command} | Ответ: {response_short}"
     
+    # Формируем строку для таблицы: [timestamp, user_id, username, first_name, command, response]
+    username_str = username if username else ""
+    row = [
+        timestamp,
+        str(user_id),
+        username_str,
+        first_name,
+        command,
+        response_short
+    ]
+    
     # Логируем только в Google Sheets (не в файл, чтобы не занимать место в памяти Railway)
     # Используем низкий приоритет, чтобы не блокировать важные данные
     if sheets_manager and sheets_manager.is_available():
         try:
-            # Формируем строку для таблицы: [timestamp, user_id, username, first_name, command, response]
-            username_str = username if username else ""
-            row = [
-                timestamp,
-                str(user_id),
-                username_str,
-                first_name,
-                command,
-                response_short
-            ]
             # Используем PRIORITY_LOW для логов - они будут пропущены при превышении лимита API
             from google_sheets_manager import PRIORITY_LOW
             success = sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
-            # Если не удалось записать (например, из-за лимита API), просто пропускаем
-            # Не логируем ошибку, чтобы не создавать дополнительную нагрузку
+            
+            # Если не удалось записать (например, из-за лимита API), добавляем в буфер
+            if not success:
+                _log_buffer.append(row)
+                logger.debug(f"Лог добавлен в буфер (размер буфера: {len(_log_buffer)})")
         except Exception as e:
             # Обрабатываем только критические ошибки (не 429)
             # Ошибка 429 (превышение лимита) обрабатывается внутри append_row и не попадает сюда
@@ -80,7 +93,70 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
             error_str = str(e)
             if '429' not in error_str and 'Quota exceeded' not in error_str:
                 logging.warning(f"Ошибка записи лога в Google Sheets: {e}")
+            # При любой ошибке добавляем в буфер
+            _log_buffer.append(row)
     else:
         # Если Google Sheets недоступен, используем стандартный logger (но не файл)
         logger.info(log_message)
+        # Также добавляем в буфер на случай, если Google Sheets станет доступен позже
+        _log_buffer.append(row)
+
+
+async def flush_log_buffer():
+    """
+    Периодическая задача для отправки буферизованных логов
+    Вызывается каждые 60 секунд
+    """
+    global _last_retry_time
+    
+    while True:
+        try:
+            await asyncio.sleep(_RETRY_INTERVAL)
+            
+            # Проверяем, есть ли что отправлять
+            if not _log_buffer:
+                continue
+            
+            if not sheets_manager or not sheets_manager.is_available():
+                continue
+            
+            # Пытаемся отправить все логи из буфера
+            from google_sheets_manager import PRIORITY_LOW
+            sent_count = 0
+            failed_count = 0
+            
+            # Отправляем логи по одному, чтобы не перегрузить API
+            while _log_buffer:
+                row = _log_buffer[0]
+                success = sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
+                
+                if success:
+                    _log_buffer.popleft()
+                    sent_count += 1
+                else:
+                    # Если не удалось отправить, останавливаемся (возможно, лимит еще не прошел)
+                    failed_count = len(_log_buffer)
+                    break
+            
+            if sent_count > 0:
+                logger.info(f"Отправлено {sent_count} логов из буфера (осталось: {failed_count})")
+            
+            _last_retry_time = datetime.now(timezone).timestamp()
+        except Exception as e:
+            logger.error(f"Ошибка при отправке буферизованных логов: {e}")
+
+
+def start_log_buffer_flusher():
+    """Запустить задачу для периодической отправки буферизованных логов"""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Если цикл уже запущен, создаем задачу
+            asyncio.create_task(flush_log_buffer())
+        else:
+            # Если цикл не запущен, запускаем в новом потоке
+            loop.run_until_complete(flush_log_buffer())
+    except RuntimeError:
+        # Если нет event loop, создаем новый
+        asyncio.create_task(flush_log_buffer())
 

@@ -1657,6 +1657,11 @@ async def main():
     # Запускаем менеджер уведомлений
     notification_manager.start()
     
+    # Запускаем задачу для периодической отправки буферизованных логов
+    from logger import flush_log_buffer
+    asyncio.create_task(flush_log_buffer())
+    logger.info("Запущена задача для отправки буферизованных логов")
+    
     # Удаляем вебхук и запускаем polling
     try:
         await bot.delete_webhook(drop_pending_updates=True)
