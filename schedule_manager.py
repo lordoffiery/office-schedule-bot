@@ -1032,12 +1032,18 @@ class ScheduleManager:
         default_schedule = self.load_default_schedule()
         
         # Копируем расписание по умолчанию (но очищаем имена, оставляя только структуру мест)
+        # Всегда создаем все 8 мест для каждого дня, даже если в default_schedule их меньше
         schedule = {}
         for day_name, places_dict in default_schedule.items():
             schedule[day_name] = {}
-            # Копируем структуру мест, но очищаем значения
+            # Копируем структуру мест из default_schedule
             for place_key in places_dict.keys():
                 schedule[day_name][place_key] = ''
+            # Дополняем до MAX_OFFICE_SEATS, если мест меньше
+            for i in range(1, MAX_OFFICE_SEATS + 1):
+                place_key = f'1.{i}'
+                if place_key not in schedule[day_name]:
+                    schedule[day_name][place_key] = ''
         
         # Шаг 1: Назначаем фиксированные места сотрудникам на основе приоритета
         employee_to_place = self._assign_fixed_places(default_schedule, schedule, employee_manager)

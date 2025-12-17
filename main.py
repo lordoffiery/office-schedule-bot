@@ -1351,9 +1351,15 @@ async def cmd_admin_set_default_schedule(message: Message):
     default_schedule = schedule_manager.load_default_schedule()
     
     # Конвертируем список сотрудников в формат словаря мест (подразделение.место)
+    # Всегда создаем все 8 мест, даже если указано меньше сотрудников
     places_dict = {}
-    for i, emp in enumerate(employees, 1):
-        places_dict[f'1.{i}'] = emp
+    for i in range(1, MAX_OFFICE_SEATS + 1):
+        place_key = f'1.{i}'
+        if i <= len(employees):
+            places_dict[place_key] = employees[i - 1]
+        else:
+            # Создаем пустое место
+            places_dict[place_key] = ''
     
     # Обновляем расписание для указанного дня
     default_schedule[day_name] = places_dict
