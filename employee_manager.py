@@ -191,6 +191,14 @@ class EmployeeManager:
                 return telegram_id
         return None
     
+    def reload_employees(self):
+        """Перезагрузить список сотрудников из Google Sheets или файла"""
+        self._load_employees()
+    
+    def reload_pending_employees(self):
+        """Перезагрузить список отложенных сотрудников из Google Sheets или файла"""
+        self._load_pending_employees()
+    
     def _load_pending_employees(self):
         """Загрузить отложенные записи сотрудников (username -> manual_name) из Google Sheets (приоритет) или файла"""
         # Очищаем текущие данные
