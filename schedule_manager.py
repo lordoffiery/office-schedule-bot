@@ -964,13 +964,16 @@ class ScheduleManager:
         for employee_name in employees_info:
             employees_info[employee_name]['days_count'] = len(employees_info[employee_name]['days'])
         
-        # Сортируем сотрудников по количеству дней (по убыванию), затем по месту из первого дня
+        # Сортируем сотрудников по количеству дней (по убыванию), затем по месту из первого дня, затем по имени
+        # Имя сотрудника добавляется для стабильности сортировки - чтобы при одинаковом приоритете
+        # сотрудники всегда получали места в одном и том же порядке
         sorted_employees = sorted(
             employees_info.items(),
             key=lambda x: (
                 -x[1]['days_count'],  # Сначала по количеству дней (по убыванию)
                 int(list(x[1]['days'].values())[0].split('.')[0]) if x[1]['days'] else 999,  # Затем по подразделению
-                int(list(x[1]['days'].values())[0].split('.')[1]) if x[1]['days'] else 999  # Затем по месту
+                int(list(x[1]['days'].values())[0].split('.')[1]) if x[1]['days'] else 999,  # Затем по месту
+                x[0]  # Затем по имени сотрудника (для стабильности)
             )
         )
         
