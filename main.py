@@ -855,6 +855,26 @@ async def cmd_admin_add_employee(message: Message):
         if username_in_text:
             # Есть username в тексте
             username = username_in_text
+            
+            # Проверяем, не используется ли имя другим сотрудником
+            existing_id = employee_manager.get_employee_id(name)
+            if existing_id:
+                # Имя уже используется другим сотрудником
+                existing_employee_data = employee_manager.get_employee_data(existing_id)
+                existing_username = ""
+                if existing_employee_data:
+                    _, _, existing_username = existing_employee_data
+                username_display = f" (@{existing_username})" if existing_username else ""
+                response = (
+                    f"❌ Имя '{name}' уже используется другим сотрудником.\n\n"
+                    f"Текущий владелец имени:\n"
+                    f"• Telegram ID: {existing_id}{username_display}\n\n"
+                    f"💡 Используйте другое имя для нового сотрудника."
+                )
+                await message.reply(response)
+                log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
+                return
+            
             # Сохраняем отложенную запись для использования при /start
             was_existing, old_name = employee_manager.add_pending_employee(username, name)
             if was_existing:
