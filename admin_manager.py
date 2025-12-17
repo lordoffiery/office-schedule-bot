@@ -37,22 +37,31 @@ class AdminManager:
         self._load_admins()
     
     def _load_admins(self):
-        """Загрузить список администраторов из файла или Google Sheets"""
-        # Пробуем загрузить из Google Sheets
+        """Загрузить список администраторов из Google Sheets (приоритет) или файла"""
+        # Начинаем с админов из config, но они будут дополнены/заменены данными из Google Sheets
+        # Очищаем текущие данные (кроме начальных из config)
+        initial_admins = self.admins.copy()
+        self.admins = set(ADMIN_IDS)  # Начинаем с админов из config
+        
+        # Пробуем загрузить из Google Sheets (приоритет)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_ADMINS)
                 rows = filter_empty_rows(rows)
                 start_idx, _ = get_header_start_idx(rows, ['admin_id', 'telegram_id', 'ID'])
+                loaded_from_sheets = False
                 for row in rows[start_idx:]:
                     if row and row[0]:
                         try:
                             admin_id = int(row[0].strip())
                             self.admins.add(admin_id)
+                            loaded_from_sheets = True
                         except ValueError:
                             continue
-                # Если загрузили из Google Sheets, сохраняем в файл для совместимости
-                if self.admins:
+                # Если Google Sheets доступен, используем его как источник истины (даже если пуст)
+                if loaded_from_sheets or (rows and len(rows) > start_idx):
+                    logger.info(f"Администраторы загружены из Google Sheets: {len(self.admins)} записей")
+                    # Сохраняем в файл для совместимости
                     self._save_admins()
                     return
             except Exception as e:
