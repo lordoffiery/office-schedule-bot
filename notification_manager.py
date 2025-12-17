@@ -125,14 +125,33 @@ class NotificationManager:
             employee_schedule = {}
             employee_places = {}  # Словарь для хранения мест сотрудника
             formatted_name = self.employee_manager.format_employee_name(employee_name)
+            plain_name = employee_name  # Простое имя без форматирования
             
             for date, day_name in week_dates:
                 employees = schedule.get(day_name, [])
                 employee_schedule[day_name] = formatted_name in employees
                 # Находим место сотрудника (если он в офисе)
                 if formatted_name in employees:
-                    place_index = employees.index(formatted_name) + 1
-                    employee_places[day_name] = f"1.{place_index}"
+                    # Ищем место в default_schedule
+                    place = None
+                    if day_name in default_schedule:
+                        places_dict = default_schedule[day_name]
+                        for place_key, name in places_dict.items():
+                            # Сравниваем простые имена
+                            plain_name_in_schedule = self.schedule_manager.get_plain_name_from_formatted(name)
+                            if plain_name_in_schedule == plain_name:
+                                place = place_key
+                                break
+                    
+                    # Если место не найдено, используем порядковый номер
+                    if place is None:
+                        try:
+                            place_index = employees.index(formatted_name) + 1
+                            place = f"1.{place_index}"
+                        except ValueError:
+                            place = "?"
+                    
+                    employee_places[day_name] = place
                 else:
                     employee_places[day_name] = None
             

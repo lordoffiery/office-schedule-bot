@@ -79,23 +79,50 @@ def day_to_short(day: str) -> str:
     return day_map.get(day, day[:2])
 
 
-def format_schedule_with_places(schedule: dict) -> str:
+def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -> str:
     """
     Форматировать расписание с указанием мест для каждого сотрудника
     
     Args:
         schedule: Dict[str, List[str]] - расписание в формате {день: [имена]}
+        default_schedule: Dict[str, Dict[str, str]] - расписание по умолчанию в формате {день: {место: имя}}
         
     Returns:
         str - отформатированное расписание с местами
     """
+    # Загружаем default_schedule, если не передан
+    if default_schedule is None:
+        default_schedule = schedule_manager.load_default_schedule()
+    
     result = []
     for day, employees in schedule.items():
         if employees:
             # Форматируем список сотрудников с местами
             employees_with_places = []
-            for i, emp in enumerate(employees, 1):
-                place = f"1.{i}"
+            for emp in employees:
+                # Получаем простое имя из отформатированного (если есть username)
+                plain_name = schedule_manager.get_plain_name_from_formatted(emp)
+                
+                # Ищем место сотрудника в default_schedule для этого дня
+                place = None
+                if day in default_schedule:
+                    places_dict = default_schedule[day]
+                    for place_key, name in places_dict.items():
+                        # Сравниваем простые имена
+                        plain_name_in_schedule = schedule_manager.get_plain_name_from_formatted(name)
+                        if plain_name_in_schedule == plain_name:
+                            place = place_key
+                            break
+                
+                # Если место не найдено, используем порядковый номер в списке
+                if place is None:
+                    # Находим индекс сотрудника в списке
+                    try:
+                        index = employees.index(emp) + 1
+                        place = f"1.{index}"
+                    except ValueError:
+                        place = "?"
+                
                 employees_with_places.append(f"{place}: {emp}")
             result.append(f"{day}: {', '.join(employees_with_places)}")
         else:
@@ -415,18 +442,40 @@ async def cmd_my_schedule(message: Message):
         requests = schedule_manager.load_requests_for_week(current_week_start)
         schedule = schedule_manager.build_schedule_from_requests(current_week_start, requests, employee_manager)
     
+    # Загружаем default_schedule для определения реальных мест
+    default_schedule = schedule_manager.load_default_schedule()
+    
     # Получаем расписание сотрудника из построенного расписания с местами
     employee_schedule = {}
     employee_places = {}  # Словарь для хранения мест сотрудника
     formatted_name = employee_manager.format_employee_name(employee_name)
+    plain_name = employee_name  # Простое имя без форматирования
     
     for date, day_name in week_dates:
         employees = schedule.get(day_name, [])
         employee_schedule[day_name] = formatted_name in employees
         # Находим место сотрудника (если он в офисе)
         if formatted_name in employees:
-            place_index = employees.index(formatted_name) + 1
-            employee_places[day_name] = f"1.{place_index}"
+            # Ищем место в default_schedule
+            place = None
+            if day_name in default_schedule:
+                places_dict = default_schedule[day_name]
+                for place_key, name in places_dict.items():
+                    # Сравниваем простые имена
+                    plain_name_in_schedule = schedule_manager.get_plain_name_from_formatted(name)
+                    if plain_name_in_schedule == plain_name:
+                        place = place_key
+                        break
+            
+            # Если место не найдено, используем порядковый номер
+            if place is None:
+                try:
+                    place_index = employees.index(formatted_name) + 1
+                    place = f"1.{place_index}"
+                except ValueError:
+                    place = "?"
+            
+            employee_places[day_name] = place
         else:
             employee_places[day_name] = None
     
@@ -830,8 +879,11 @@ async def cmd_full_schedule(message: Message):
         requests = schedule_manager.load_requests_for_week(week_start)
         schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
     
+    # Загружаем default_schedule для определения реальных мест
+    default_schedule = schedule_manager.load_default_schedule()
+    
     message_text = f"📅 Расписание на {date.strftime('%d.%m.%Y')}:\n\n"
-    message_text += format_schedule_with_places(schedule)
+    message_text += format_schedule_with_places(schedule, default_schedule)
     
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", message_text[:200])
