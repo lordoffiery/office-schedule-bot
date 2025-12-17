@@ -43,29 +43,35 @@ class AdminManager:
         initial_admins = self.admins.copy()
         self.admins = set(ADMIN_IDS)  # Начинаем с админов из config
         
-        # Пробуем загрузить из Google Sheets (приоритет)
+        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
         if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                rows = self.sheets_manager.read_all_rows(SHEET_ADMINS)
-                rows = filter_empty_rows(rows)
-                start_idx, _ = get_header_start_idx(rows, ['admin_id', 'telegram_id', 'ID'])
-                loaded_from_sheets = False
-                for row in rows[start_idx:]:
-                    if row and row[0]:
-                        try:
-                            admin_id = int(row[0].strip())
-                            self.admins.add(admin_id)
-                            loaded_from_sheets = True
-                        except ValueError:
-                            continue
-                # Если Google Sheets доступен, используем его как источник истины (даже если пуст)
-                if loaded_from_sheets or (rows and len(rows) > start_idx):
-                    logger.info(f"Администраторы загружены из Google Sheets: {len(self.admins)} записей")
-                    # Сохраняем в файл для совместимости
-                    self._save_admins()
-                    return
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки администраторов из Google Sheets: {e}, используем файлы")
+            # Проверяем, есть ли буферизованные операции для листа admins
+            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_ADMINS)
+            
+            if not has_buffered:
+                try:
+                    rows = self.sheets_manager.read_all_rows(SHEET_ADMINS)
+                    rows = filter_empty_rows(rows)
+                    start_idx, _ = get_header_start_idx(rows, ['admin_id', 'telegram_id', 'ID'])
+                    loaded_from_sheets = False
+                    for row in rows[start_idx:]:
+                        if row and row[0]:
+                            try:
+                                admin_id = int(row[0].strip())
+                                self.admins.add(admin_id)
+                                loaded_from_sheets = True
+                            except ValueError:
+                                continue
+                    # Если Google Sheets доступен, используем его как источник истины (даже если пуст)
+                    if loaded_from_sheets or (rows and len(rows) > start_idx):
+                        logger.info(f"Администраторы загружены из Google Sheets: {len(self.admins)} записей")
+                        # Сохраняем в файл для совместимости
+                        self._save_admins()
+                        return
+                except Exception as e:
+                    logger.warning(f"Ошибка загрузки администраторов из Google Sheets: {e}, используем файлы")
+            else:
+                logger.debug(f"Есть буферизованные операции для {SHEET_ADMINS}, используем локальные файлы")
         
         # Загружаем из файла
         if not os.path.exists(ADMINS_FILE):
