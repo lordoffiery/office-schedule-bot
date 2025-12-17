@@ -94,6 +94,16 @@ def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -
     if default_schedule is None:
         default_schedule = schedule_manager.load_default_schedule()
     
+    def parse_place_key(place_key: str) -> tuple:
+        """Парсит ключ места (например, '1.6') в кортеж для сортировки (1, 6)"""
+        try:
+            parts = place_key.split('.')
+            if len(parts) == 2:
+                return (int(parts[0]), int(parts[1]))
+            return (999, 999)  # Для некорректных форматов - в конец
+        except (ValueError, IndexError):
+            return (999, 999)
+    
     result = []
     for day, employees in schedule.items():
         if employees:
@@ -121,10 +131,16 @@ def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -
                         index = employees.index(emp) + 1
                         place = f"1.{index}"
                     except ValueError:
-                        place = "?"
+                        place = "1.999"  # Для сортировки
                 
-                employees_with_places.append(f"{place}: {emp}")
-            result.append(f"{day}: {', '.join(employees_with_places)}")
+                employees_with_places.append((place, emp))
+            
+            # Сортируем по номеру места (1.1, 1.2, 1.3...)
+            employees_with_places.sort(key=lambda x: parse_place_key(x[0]))
+            
+            # Форматируем отсортированный список
+            formatted_list = [f"{place}: {emp}" for place, emp in employees_with_places]
+            result.append(f"{day}: {', '.join(formatted_list)}")
         else:
             result.append(f"{day}: (пусто)")
     return "\n".join(result)
