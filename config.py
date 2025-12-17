@@ -5,7 +5,10 @@ import os
 from typing import List
 
 # Telegram Bot Token (получите у @BotFather)
-API_TOKEN = os.getenv('BOT_TOKEN', '7770460363:AAEGPCzfjdhvmOomQf1FyBoCV3Xyl2etibU')
+# Устанавливается через переменную окружения BOT_TOKEN
+API_TOKEN = os.getenv('BOT_TOKEN')
+if not API_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is required")
 
 # ID администраторов (список Telegram user IDs)
 ADMIN_IDS: List[int] = [int(x) for x in os.getenv('ADMIN_IDS', '312551109').split(',') if x]
