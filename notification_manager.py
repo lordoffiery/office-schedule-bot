@@ -218,7 +218,7 @@ class NotificationManager:
             free_slots_info = []
             for day, slots in available_slots.items():
                 if day not in office_days and slots > 0:
-                    free_slots_info.append(f"{day_to_short(day)}: {slots} место(а)")
+                    free_slots_info.append(f"  {day_to_short(day)}: {slots} место(а)")
             
             if free_slots_info:
                 message += f"\n💡 Свободные места:\n"
