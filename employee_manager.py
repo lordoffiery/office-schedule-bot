@@ -236,11 +236,21 @@ class EmployeeManager:
             for username, manual_name in sorted(self.pending_employees.items()):
                 f.write(f"{username}:{manual_name}\n")
     
-    def add_pending_employee(self, username: str, manual_name: str):
-        """Добавить отложенную запись сотрудника (когда админ добавляет по username до /start)"""
+    def add_pending_employee(self, username: str, manual_name: str) -> tuple[bool, Optional[str]]:
+        """
+        Добавить отложенную запись сотрудника (когда админ добавляет по username до /start)
+        
+        Returns:
+            (was_existing, old_name): 
+            - was_existing: True если запись уже существовала, False если новая
+            - old_name: старое имя, если запись существовала, иначе None
+        """
         username_lower = username.lower().lstrip('@')
+        was_existing = username_lower in self.pending_employees
+        old_name = self.pending_employees.get(username_lower) if was_existing else None
         self.pending_employees[username_lower] = manual_name
         self._save_pending_employees()
+        return (was_existing, old_name)
     
     def get_pending_employee(self, username: str) -> Optional[str]:
         """Получить имя вручную из отложенной записи по username"""

@@ -855,11 +855,20 @@ async def cmd_admin_add_employee(message: Message):
             # Есть username в тексте
             username = username_in_text
             # Сохраняем отложенную запись для использования при /start
-            employee_manager.add_pending_employee(username, name)
-            response = (
-                f"✅ Отложенная запись для сотрудника {name} (@{username}) сохранена.\n\n"
-                f"Попросите @{username} написать боту /start - он будет автоматически добавлен с именем '{name}'."
-            )
+            was_existing, old_name = employee_manager.add_pending_employee(username, name)
+            if was_existing:
+                # Запись уже существовала - обновлено имя
+                response = (
+                    f"ℹ️ Отложенная запись для @{username} уже существовала.\n\n"
+                    f"📝 Имя обновлено: '{old_name}' → '{name}'\n\n"
+                    f"Попросите @{username} написать боту /start - он будет автоматически добавлен с именем '{name}'."
+                )
+            else:
+                # Новая запись
+                response = (
+                    f"✅ Отложенная запись для сотрудника {name} (@{username}) сохранена.\n\n"
+                    f"Попросите @{username} написать боту /start - он будет автоматически добавлен с именем '{name}'."
+                )
             await message.reply(response)
             log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
             return
