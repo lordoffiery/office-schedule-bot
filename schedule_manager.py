@@ -2,6 +2,7 @@
 Управление расписаниями
 """
 import os
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -65,8 +66,13 @@ class ScheduleManager:
                 f.write(f"{day}\n")
                 f.write(f"{', '.join(employees)}\n")
     
-    def load_default_schedule(self) -> Dict[str, List[str]]:
-        """Загрузить расписание по умолчанию"""
+    def load_default_schedule(self) -> Dict[str, Dict[str, str]]:
+        """
+        Загрузить расписание по умолчанию в формате JSON (день -> {подразделение.место: имя})
+        
+        Returns:
+            Dict[str, Dict[str, str]]: Расписание по дням, где внутренний словарь - места (ключ: "подразделение.место")
+        """
         schedule = {}
         
         # Пробуем загрузить из Google Sheets
@@ -79,10 +85,21 @@ class ScheduleManager:
                     if len(row) >= 2:
                         try:
                             day_name = row[0].strip()
-                            employees_str = row[1].strip() if row[1] else ""
-                            employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                            schedule[day_name] = employees
-                        except (ValueError, IndexError):
+                            # Пытаемся распарсить как JSON
+                            if row[1].strip().startswith('{'):
+                                places_dict = json.loads(row[1].strip())
+                                schedule[day_name] = places_dict
+                            else:
+                                # Старый формат (список через запятую) - конвертируем
+                                employees_str = row[1].strip() if row[1] else ""
+                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                # Конвертируем в новый формат
+                                places_dict = {}
+                                for i, emp in enumerate(employees, 1):
+                                    places_dict[f'1.{i}'] = emp
+                                schedule[day_name] = places_dict
+                        except (ValueError, IndexError, json.JSONDecodeError) as e:
+                            logger.warning(f"Ошибка парсинга строки расписания: {e}")
                             continue
                 # Если загрузили из Google Sheets, возвращаем результат
                 if schedule:
@@ -93,19 +110,40 @@ class ScheduleManager:
         # Загружаем из файла
         if os.path.exists(DEFAULT_SCHEDULE_FILE):
             try:
+                # Пытаемся загрузить как JSON
                 with open(DEFAULT_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
-                    current_day = None
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if line in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                            current_day = line
-                            schedule[current_day] = []
-                        elif current_day:
-                            employees = [e.strip() for e in line.split(',') if e.strip()]
-                            schedule[current_day] = employees
-            except Exception as e:
+                    content = f.read().strip()
+                    if content.startswith('{'):
+                        # JSON формат
+                        schedule = json.loads(content)
+                    else:
+                        # Старый формат (текстовый) - конвертируем
+                        schedule = {}
+                        current_day = None
+                        for line in content.split('\n'):
+                            line = line.strip()
+                            if not line:
+                                continue
+                            if line in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+                                current_day = line
+                                schedule[current_day] = {}
+                            elif current_day and ':' in line:
+                                # Формат: "Понедельник: Вася, Дима Ч, ..."
+                                if line.startswith(current_day + ':'):
+                                    employees_str = line.split(':', 1)[1].strip()
+                                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                    places_dict = {}
+                                    for i, emp in enumerate(employees, 1):
+                                        places_dict[f'1.{i}'] = emp
+                                    schedule[current_day] = places_dict
+                                else:
+                                    # Просто список через запятую
+                                    employees = [e.strip() for e in line.split(',') if e.strip()]
+                                    places_dict = {}
+                                    for i, emp in enumerate(employees, 1):
+                                        places_dict[f'1.{i}'] = emp
+                                    schedule[current_day] = places_dict
+            except (json.JSONDecodeError, Exception) as e:
                 logger.error(f"Ошибка загрузки расписания по умолчанию: {e}")
         
         # Если не загрузилось, используем из config
@@ -114,47 +152,33 @@ class ScheduleManager:
         
         return schedule
     
-    def save_default_schedule(self, schedule: Dict[str, List[str]]):
-        """Сохранить расписание по умолчанию в Google Sheets и файл"""
+    def save_default_schedule(self, schedule: Dict[str, Dict[str, str]]):
+        """
+        Сохранить расписание по умолчанию в Google Sheets и файл (JSON формат)
+        
+        Args:
+            schedule: Dict[str, Dict[str, str]] - расписание по дням, где внутренний словарь - места (ключ: "подразделение.место")
+        """
         # Пробуем сохранить в Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
-                rows_to_save = []
+                rows_to_save = [['day_name', 'places_json']]  # Заголовок
                 for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                    employees = schedule.get(day_name, [])
-                    employees_str = ', '.join(employees)
-                    rows_to_save.append([day_name, employees_str])
+                    places_dict = schedule.get(day_name, {})
+                    # Сохраняем как JSON строку
+                    places_json = json.dumps(places_dict, ensure_ascii=False)
+                    rows_to_save.append([day_name, places_json])
                 
-                # Проверяем, есть ли заголовок
-                worksheet = self.sheets_manager.get_worksheet(SHEET_DEFAULT_SCHEDULE)
-                if worksheet:
-                    all_rows = worksheet.get_all_values()
-                    all_rows = filter_empty_rows(all_rows)
-                    # Убеждаемся, что есть заголовок
-                    rows_to_save = ensure_header(all_rows, ['day_name', 'employees'], ['day', 'day_name', 'День'])
-                    # Заменяем данные на новые (сохраняем только заголовок + новые данные)
-                    if len(rows_to_save) > 0:
-                        rows_to_save = [rows_to_save[0]]  # Сохраняем заголовок
-                    else:
-                        rows_to_save = [['day_name', 'employees']]
-                    # Добавляем новые данные
-                    for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                        employees = schedule.get(day_name, [])
-                        employees_str = ', '.join(employees)
-                        rows_to_save.append([day_name, employees_str])
-                    
-                    # Перезаписываем весь лист
-                    self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
-                    logger.info(f"Расписание по умолчанию сохранено в Google Sheets")
+                # Перезаписываем весь лист
+                self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
+                logger.info(f"Расписание по умолчанию сохранено в Google Sheets")
             except Exception as e:
                 logger.error(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}, используем файлы")
         
-        # Сохраняем в файл
+        # Сохраняем в файл как JSON
         try:
             with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
-                for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                    employees = schedule.get(day_name, [])
-                    f.write(f"{day_name}: {', '.join(employees)}\n")
+                json.dump(schedule, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Ошибка сохранения расписания по умолчанию в файл: {e}")
     
@@ -163,6 +187,89 @@ class ScheduleManager:
         if '(@' in formatted_name and formatted_name.endswith(')'):
             return formatted_name.split('(@')[0]
         return formatted_name
+    
+    def _default_schedule_to_list(self, schedule: Dict[str, Dict[str, str]]) -> Dict[str, List[str]]:
+        """
+        Конвертировать расписание по умолчанию из формата JSON в список для обратной совместимости
+        
+        Args:
+            schedule: Dict[str, Dict[str, str]] - расписание в формате {день: {место: имя}}
+            
+        Returns:
+            Dict[str, List[str]] - расписание в формате {день: [имена]}
+        """
+        result = {}
+        for day_name, places_dict in schedule.items():
+            # Сортируем места по номеру подразделения и месту
+            sorted_places = sorted(places_dict.items(), key=lambda x: (int(x[0].split('.')[0]), int(x[0].split('.')[1])))
+            result[day_name] = [name for _, name in sorted_places if name]
+        return result
+    
+    def _list_to_default_schedule(self, schedule: Dict[str, List[str]], department: int = 1) -> Dict[str, Dict[str, str]]:
+        """
+        Конвертировать расписание по умолчанию из формата списка в JSON формат
+        
+        Args:
+            schedule: Dict[str, List[str]] - расписание в формате {день: [имена]}
+            department: int - номер подразделения (по умолчанию 1)
+            
+        Returns:
+            Dict[str, Dict[str, str]] - расписание в формате {день: {место: имя}}
+        """
+        result = {}
+        for day_name, employees in schedule.items():
+            places_dict = {}
+            for i, emp in enumerate(employees, 1):
+                places_dict[f'{department}.{i}'] = emp
+            result[day_name] = places_dict
+        return result
+    
+    def _find_employee_in_places(self, places_dict: Dict[str, str], employee_name: str) -> Optional[str]:
+        """
+        Найти сотрудника в словаре мест и вернуть ключ места
+        
+        Args:
+            places_dict: Dict[str, str] - словарь мест {место: имя}
+            employee_name: str - имя сотрудника для поиска
+            
+        Returns:
+            Optional[str] - ключ места (например, "1.1") или None
+        """
+        for place_key, name in places_dict.items():
+            plain_name = self.get_plain_name_from_formatted(name)
+            if plain_name == employee_name:
+                return place_key
+        return None
+    
+    def _get_employees_list_from_places(self, places_dict: Dict[str, str]) -> List[str]:
+        """
+        Получить список имен сотрудников из словаря мест (отсортированный по месту)
+        
+        Args:
+            places_dict: Dict[str, str] - словарь мест {место: имя}
+            
+        Returns:
+            List[str] - список имен, отсортированный по номеру места
+        """
+        sorted_places = sorted(places_dict.items(), key=lambda x: (int(x[0].split('.')[0]), int(x[0].split('.')[1])))
+        return [name for _, name in sorted_places if name]
+    
+    def _find_free_place(self, places_dict: Dict[str, str], department: int = 1) -> Optional[str]:
+        """
+        Найти свободное место в словаре мест
+        
+        Args:
+            places_dict: Dict[str, str] - словарь мест {место: имя}
+            department: int - номер подразделения
+            
+        Returns:
+            Optional[str] - ключ свободного места (например, "1.1") или None
+        """
+        for i in range(1, MAX_OFFICE_SEATS + 1):
+            place_key = f'{department}.{i}'
+            if place_key not in places_dict or not places_dict[place_key]:
+                return place_key
+        return None
     
     def get_week_start(self, date: Optional[datetime] = None) -> datetime:
         """Получить начало недели (понедельник) для указанной даты"""
@@ -292,13 +399,15 @@ class ScheduleManager:
         
         # Если файла нет, возвращаем расписание по умолчанию
         default_schedule = self.load_default_schedule()
+        # Конвертируем из формата JSON (словарь мест) в формат списка для обратной совместимости
+        default_schedule_list = self._default_schedule_to_list(default_schedule)
         # Форматируем имена в расписании по умолчанию, если есть employee_manager
         if employee_manager:
             formatted_default = {}
-            for day, employees in default_schedule.items():
+            for day, employees in default_schedule_list.items():
                 formatted_default[day] = [employee_manager.format_employee_name(emp) for emp in employees]
             return formatted_default
-        return default_schedule
+        return default_schedule_list
     
     def save_schedule_for_week(self, week_start: datetime, schedule: Dict[str, List[str]]):
         """Сохранить расписание на неделю"""
@@ -806,9 +915,19 @@ class ScheduleManager:
     def build_schedule_from_requests(self, week_start: datetime, 
                                      requests: List[Dict],
                                      employee_manager) -> Dict[str, List[str]]:
-        """Построить расписание на основе заявок"""
-        # Начинаем с расписания по умолчанию
-        schedule = self.load_default_schedule()
+        """
+        Построить расписание на основе заявок
+        
+        Returns:
+            Dict[str, List[str]] - расписание в формате {день: [имена]} для обратной совместимости
+        """
+        # Начинаем с расписания по умолчанию (в новом формате JSON)
+        default_schedule = self.load_default_schedule()
+        
+        # Конвертируем в рабочий формат (копируем, чтобы не изменять оригинал)
+        schedule = {}
+        for day_name, places_dict in default_schedule.items():
+            schedule[day_name] = places_dict.copy()
         
         # Для каждого сотрудника с заявкой:
         # 1. Удаляем его из дней, которые он пропустил
@@ -821,32 +940,28 @@ class ScheduleManager:
             # Удаляем сотрудника из пропущенных дней
             for day in days_skipped:
                 if day in schedule:
-                    for i in range(len(schedule[day]) - 1, -1, -1):  # Идем с конца, чтобы не сломать индексы
-                        emp = schedule[day][i]
-                        plain_name = self.get_plain_name_from_formatted(emp)
-                        if plain_name == employee_name:
-                            schedule[day].pop(i)
-                            break
+                    place_key = self._find_employee_in_places(schedule[day], employee_name)
+                    if place_key:
+                        # Освобождаем место
+                        schedule[day][place_key] = ''
             
             # Добавляем сотрудника в запрошенные дни (которые не в пропусках)
             for day in days_requested:
                 if day in schedule and day not in days_skipped:
-                    # Проверяем, есть ли уже сотрудник в списке (может быть отформатированным)
-                    employee_exists = False
-                    for emp in schedule[day]:
-                        plain_name = self.get_plain_name_from_formatted(emp)
-                        if plain_name == employee_name:
-                            employee_exists = True
-                            break
-                    if not employee_exists:
-                        # Проверяем, есть ли место
-                        if len(schedule[day]) < MAX_OFFICE_SEATS:
-                            schedule[day].append(employee_name)
+                    # Проверяем, есть ли уже сотрудник в расписании
+                    place_key = self._find_employee_in_places(schedule[day], employee_name)
+                    if not place_key:
+                        # Ищем свободное место (начинаем с первого подразделения)
+                        free_place = self._find_free_place(schedule[day], department=1)
+                        if free_place:
+                            schedule[day][free_place] = employee_name
                         # Если места нет, сотрудник не добавляется (работает удаленно)
         
-        # Форматируем имена с никнеймами для вывода
+        # Конвертируем обратно в формат списка для вывода
         formatted_schedule = {}
-        for day, employees in schedule.items():
+        for day, places_dict in schedule.items():
+            employees = self._get_employees_list_from_places(places_dict)
+            # Форматируем имена с никнеймами для вывода
             formatted_schedule[day] = [employee_manager.format_employee_name(emp) for emp in employees]
         
         return formatted_schedule
@@ -876,24 +991,19 @@ class ScheduleManager:
     
     def update_employee_name_in_default_schedule(self, old_name: str, new_formatted_name: str):
         """Обновить имя сотрудника в default_schedule (заменить простое имя на форматированное)"""
-        # Загружаем текущее расписание
+        # Загружаем текущее расписание (в новом формате JSON)
         schedule = self.load_default_schedule()
         
         # Обновляем имена в расписании
         updated = False
-        for day_name in schedule:
-            employees = schedule[day_name]
-            updated_employees = []
-            for emp in employees:
+        for day_name, places_dict in schedule.items():
+            for place_key, name in places_dict.items():
                 # Извлекаем простое имя из отформатированного (если есть)
-                plain_name = self.get_plain_name_from_formatted(emp)
+                plain_name = self.get_plain_name_from_formatted(name)
                 # Если простое имя совпадает с old_name, заменяем на новое форматированное
                 if plain_name == old_name:
-                    updated_employees.append(new_formatted_name)
+                    schedule[day_name][place_key] = new_formatted_name
                     updated = True
-                else:
-                    updated_employees.append(emp)
-            schedule[day_name] = updated_employees
         
         # Если были изменения, сохраняем обновленное расписание
         if updated:

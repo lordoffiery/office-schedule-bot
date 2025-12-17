@@ -135,10 +135,11 @@ class NotificationManager:
             for req in requests:
                 if req['employee_name'] == employee_name:
                     for day in req['days_requested']:
-                        # Проверяем, был ли сотрудник в этом дне в расписании по умолчанию
+                        # Проверяем, был ли сотрудник в этом дне в расписании по умолчанию (новый формат: словарь мест)
                         was_in_default = False
                         if day in default_schedule:
-                            for emp in default_schedule[day]:
+                            places_dict = default_schedule[day]
+                            for place_key, emp in places_dict.items():
                                 plain_name = self.schedule_manager.get_plain_name_from_formatted(emp)
                                 if plain_name == employee_name:
                                     was_in_default = True

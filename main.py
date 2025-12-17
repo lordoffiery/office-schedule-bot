@@ -277,9 +277,10 @@ async def cmd_set_week_days(message: Message):
     week_days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
     for day in week_days:
         if day in default_schedule:
-            # Проверяем, есть ли сотрудник в списке (может быть отформатированным)
+            # Проверяем, есть ли сотрудник в расписании (новый формат: словарь мест)
+            places_dict = default_schedule[day]
             employee_in_schedule = False
-            for emp in default_schedule[day]:
+            for place_key, emp in places_dict.items():
                 plain_name = schedule_manager.get_plain_name_from_formatted(emp)
                 if plain_name == employee_name:
                     employee_in_schedule = True
@@ -1179,8 +1180,13 @@ async def cmd_admin_set_default_schedule(message: Message):
     # Загружаем текущее расписание по умолчанию
     default_schedule = schedule_manager.load_default_schedule()
     
+    # Конвертируем список сотрудников в формат словаря мест (подразделение.место)
+    places_dict = {}
+    for i, emp in enumerate(employees, 1):
+        places_dict[f'1.{i}'] = emp
+    
     # Обновляем расписание для указанного дня
-    default_schedule[day_name] = employees
+    default_schedule[day_name] = places_dict
     
     # Сохраняем обновленное расписание
     schedule_manager.save_default_schedule(default_schedule)
@@ -1393,9 +1399,10 @@ async def handle_text_message(message: Message):
             week_days = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']
             for day in week_days:
                 if day in default_schedule:
-                    # Проверяем, есть ли сотрудник в списке (может быть отформатированным)
+                    # Проверяем, есть ли сотрудник в расписании (новый формат: словарь мест)
+                    places_dict = default_schedule[day]
                     employee_in_schedule = False
-                    for emp in default_schedule[day]:
+                    for place_key, emp in places_dict.items():
                         plain_name = schedule_manager.get_plain_name_from_formatted(emp)
                         if plain_name == employee_name:
                             employee_in_schedule = True
