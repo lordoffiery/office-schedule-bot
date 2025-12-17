@@ -179,7 +179,7 @@ async def cmd_start(message: Message):
     was_registered = employee_manager.is_registered(user_id)
     was_new, was_added_by_admin = employee_manager.register_user(user_id, user_name, username)
     
-    # Если пользователь был добавлен админом (через pending или напрямую), обновляем default_schedule
+    # Если пользователь был добавлен админом (через pending или напрямую), обновляем default_schedule и schedules
     if was_added_by_admin:
         employee_name = employee_manager.get_employee_name(user_id)
         if employee_name:
@@ -187,6 +187,8 @@ async def cmd_start(message: Message):
             formatted_name = employee_manager.format_employee_name_by_id(user_id)
             # Обновляем имя в default_schedule (добавляем username в скобках)
             schedule_manager.update_employee_name_in_default_schedule(employee_name, formatted_name)
+            # Обновляем имя во всех расписаниях в Google Sheets (вкладка schedules)
+            schedule_manager.update_employee_name_in_schedules(employee_name, formatted_name)
     
     if was_new and not was_added_by_admin:
         # Пользователь сам себя зарегистрировал, не был добавлен админом

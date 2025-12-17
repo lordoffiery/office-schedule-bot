@@ -1142,6 +1142,64 @@ class ScheduleManager:
         if updated:
             self.save_default_schedule(schedule)
     
+    def update_employee_name_in_schedules(self, old_name: str, new_formatted_name: str):
+        """Обновить имя сотрудника во всех расписаниях в Google Sheets (вкладка schedules)"""
+        if not self.sheets_manager or not self.sheets_manager.is_available():
+            return
+        
+        try:
+            rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+            rows = filter_empty_rows(rows)
+            start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+            
+            updated = False
+            rows_to_save = []
+            
+            # Сохраняем заголовок, если есть
+            if has_header:
+                rows_to_save.append(rows[0])
+            else:
+                rows_to_save.append(['date', 'day_name', 'employees'])
+            
+            # Обрабатываем все строки
+            for row in rows[start_idx:]:
+                if len(row) >= 3 and row[2]:  # Проверяем, что есть список сотрудников
+                    employees_str = row[2].strip()
+                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                    
+                    # Проверяем, есть ли старое имя в списке
+                    updated_row = False
+                    new_employees = []
+                    for emp in employees:
+                        # Извлекаем простое имя из отформатированного (если есть)
+                        plain_name = self.get_plain_name_from_formatted(emp)
+                        if plain_name == old_name:
+                            # Заменяем на новое форматированное имя
+                            new_employees.append(new_formatted_name)
+                            updated_row = True
+                            updated = True
+                        else:
+                            new_employees.append(emp)
+                    
+                    if updated_row:
+                        # Обновляем строку с новым списком сотрудников
+                        new_row = row.copy()
+                        new_row[2] = ', '.join(new_employees)
+                        rows_to_save.append(new_row)
+                    else:
+                        # Оставляем строку без изменений
+                        rows_to_save.append(row)
+                else:
+                    # Оставляем строку без изменений (некорректный формат)
+                    rows_to_save.append(row)
+            
+            # Если были изменения, сохраняем обновленные данные
+            if updated:
+                self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
+                logger.info(f"Обновлено имя сотрудника '{old_name}' → '{new_formatted_name}' во всех расписаниях в Google Sheets")
+        except Exception as e:
+            logger.error(f"Ошибка обновления имени сотрудника в расписаниях: {e}")
+    
     def _update_all_employee_names_in_default_schedule(self):
         """Обновить все имена сотрудников в default_schedule.txt при старте бота"""
         if not self.employee_manager:
