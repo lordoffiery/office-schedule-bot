@@ -5,8 +5,11 @@ import os
 import json
 import logging
 import time
-from typing import Dict, List, Optional, Any
+import asyncio
+from typing import Dict, List, Optional, Any, Tuple
 from collections import deque
+from dataclasses import dataclass
+from enum import Enum
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -20,6 +23,42 @@ PRIORITY_LOW = 0   # Логи
 # Лимиты Google Sheets API: 100 запросов в 100 секунд
 API_RATE_LIMIT = 100
 API_TIME_WINDOW = 100  # секунд
+
+# Интервал повторной попытки отправки буферизованных данных
+BUFFER_RETRY_INTERVAL = 60  # секунд
+
+
+class OperationType(Enum):
+    """Типы операций для буферизации"""
+    APPEND_ROW = "append_row"
+    WRITE_ROWS = "write_rows"
+    UPDATE_ROW = "update_row"
+    DELETE_ROW = "delete_row"
+    SET_CELL = "set_cell"
+
+
+@dataclass
+class BufferedOperation:
+    """Операция, которая не удалась и была добавлена в буфер"""
+    operation_type: OperationType
+    worksheet_name: str
+    data: Any  # Может быть row, rows, cell, value и т.д.
+    priority: int
+    timestamp: float
+
+
+class GoogleSheetsManager:
+    """Класс для управления данными через Google Sheets"""
+    
+    def __init__(self):
+        self.client = None
+        self.spreadsheet = None
+        # Отслеживание запросов для контроля лимитов API
+        self.request_times = deque()  # Временные метки последних запросов
+        # Буфер для несохраненных операций (из-за ошибок API)
+        self.operation_buffer: deque = deque(maxlen=5000)  # Максимум 5000 операций
+        self._buffer_flusher_task = None
+        self._init_client()
 
 
 class GoogleSheetsManager:
@@ -190,6 +229,19 @@ class GoogleSheetsManager:
                 worksheet.update(rows, value_input_option='RAW')
                 self._record_request()
             return True
+        except gspread.exceptions.APIError as e:
+            # Обработка ошибки 429 (превышение лимита)
+            if e.response.status_code == 429:
+                # Добавляем в буфер для повторной попытки
+                self._add_to_buffer(OperationType.WRITE_ROWS, worksheet_name, {'rows': rows, 'clear_first': clear_first}, priority)
+                if priority == PRIORITY_LOW:
+                    return False
+                else:
+                    logger.warning(f"Превышен лимит API при записи в {worksheet_name}, добавлено в буфер")
+                    return False
+            else:
+                logger.error(f"Ошибка записи в {worksheet_name}: {e}")
+                return False
         except Exception as e:
             logger.error(f"Ошибка записи в {worksheet_name}: {e}")
             return False
@@ -220,12 +272,14 @@ class GoogleSheetsManager:
         except gspread.exceptions.APIError as e:
             # Обработка ошибки 429 (превышение лимита)
             if e.response.status_code == 429:
+                # Добавляем в буфер для повторной попытки
+                self._add_to_buffer(OperationType.APPEND_ROW, worksheet_name, row, priority)
                 if priority == PRIORITY_LOW:
                     # Для логов просто пропускаем, не логируем ошибку
                     return False
                 else:
                     # Для высокоприоритетных запросов логируем предупреждение
-                    logger.warning(f"Превышен лимит API при добавлении строки в {worksheet_name}: {e}")
+                    logger.warning(f"Превышен лимит API при добавлении строки в {worksheet_name}, добавлено в буфер")
                     return False
             else:
                 logger.error(f"Ошибка добавления строки в {worksheet_name}: {e}")
@@ -233,6 +287,124 @@ class GoogleSheetsManager:
         except Exception as e:
             logger.error(f"Ошибка добавления строки в {worksheet_name}: {e}")
             return False
+    
+    def _add_to_buffer(self, operation_type: OperationType, worksheet_name: str, data: Any, priority: int):
+        """Добавить операцию в буфер для повторной попытки"""
+        buffered_op = BufferedOperation(
+            operation_type=operation_type,
+            worksheet_name=worksheet_name,
+            data=data,
+            priority=priority,
+            timestamp=time.time()
+        )
+        self.operation_buffer.append(buffered_op)
+        logger.debug(f"Операция {operation_type.value} для {worksheet_name} добавлена в буфер (размер: {len(self.operation_buffer)})")
+    
+    async def _flush_operation_buffer(self):
+        """
+        Периодическая задача для отправки буферизованных операций
+        Вызывается каждые 60 секунд
+        """
+        while True:
+            try:
+                await asyncio.sleep(BUFFER_RETRY_INTERVAL)
+                
+                # Проверяем, есть ли что отправлять
+                if not self.operation_buffer:
+                    continue
+                
+                if not self.is_available():
+                    continue
+                
+                # Сортируем операции по приоритету (высокоприоритетные сначала)
+                sorted_ops = sorted(self.operation_buffer, key=lambda x: (x.priority, x.timestamp), reverse=True)
+                
+                # Пытаемся отправить операции
+                sent_count = 0
+                failed_count = 0
+                
+                for op in sorted_ops:
+                    # Проверяем лимит перед каждой операцией
+                    if not self._check_rate_limit(op.priority):
+                        # Если лимит достигнут, останавливаемся
+                        failed_count = len([o for o in self.operation_buffer if o not in sorted_ops[:sent_count]])
+                        break
+                    
+                    success = False
+                    try:
+                        if op.operation_type == OperationType.APPEND_ROW:
+                            worksheet = self.get_worksheet(op.worksheet_name)
+                            if worksheet:
+                                worksheet.append_row(op.data, value_input_option='RAW')
+                                self._record_request()
+                                success = True
+                        elif op.operation_type == OperationType.WRITE_ROWS:
+                            worksheet = self.get_worksheet(op.worksheet_name)
+                            if worksheet:
+                                if op.data.get('clear_first', True):
+                                    worksheet.clear()
+                                    self._record_request()
+                                if op.data.get('rows'):
+                                    worksheet.update(op.data['rows'], value_input_option='RAW')
+                                    self._record_request()
+                                success = True
+                        elif op.operation_type == OperationType.UPDATE_ROW:
+                            worksheet = self.get_worksheet(op.worksheet_name)
+                            if worksheet:
+                                all_rows = worksheet.get_all_values()
+                                self._record_request()
+                                for i, row in enumerate(all_rows, start=1):
+                                    if len(row) > op.data['search_col'] and str(row[op.data['search_col']]) == str(op.data['search_value']):
+                                        worksheet.update(f'A{i}', [op.data['new_row']], value_input_option='RAW')
+                                        self._record_request()
+                                        success = True
+                                        break
+                        elif op.operation_type == OperationType.SET_CELL:
+                            worksheet = self.get_worksheet(op.worksheet_name)
+                            if worksheet:
+                                worksheet.update(op.data['cell'], op.data['value'], value_input_option='RAW')
+                                self._record_request()
+                                success = True
+                        
+                        if success:
+                            # Удаляем операцию из буфера
+                            if op in self.operation_buffer:
+                                self.operation_buffer.remove(op)
+                            sent_count += 1
+                        else:
+                            failed_count += 1
+                    except gspread.exceptions.APIError as e:
+                        if e.response.status_code == 429:
+                            # Лимит все еще превышен, оставляем в буфере
+                            failed_count += 1
+                            break  # Прекращаем попытки
+                        else:
+                            # Другая ошибка - удаляем из буфера, чтобы не зациклиться
+                            if op in self.operation_buffer:
+                                self.operation_buffer.remove(op)
+                            logger.error(f"Ошибка при повторной отправке операции {op.operation_type.value}: {e}")
+                    except Exception as e:
+                        # Другая ошибка - удаляем из буфера
+                        if op in self.operation_buffer:
+                            self.operation_buffer.remove(op)
+                        logger.error(f"Ошибка при повторной отправке операции {op.operation_type.value}: {e}")
+                
+                if sent_count > 0:
+                    logger.info(f"Отправлено {sent_count} операций из буфера (осталось: {failed_count})")
+            except Exception as e:
+                logger.error(f"Ошибка при отправке буферизованных операций: {e}")
+    
+    def start_buffer_flusher(self):
+        """Запустить задачу для периодической отправки буферизованных операций"""
+        if self._buffer_flusher_task is None or self._buffer_flusher_task.done():
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    self._buffer_flusher_task = asyncio.create_task(self._flush_operation_buffer())
+                    logger.info("Запущена задача для отправки буферизованных операций")
+            except RuntimeError:
+                # Если нет event loop, создадим задачу позже
+                pass
     
     def find_and_update_row(self, worksheet_name: str, search_col: int, search_value: str, new_row: List[str], priority: int = PRIORITY_HIGH):
         """Найти строку по значению в колонке и обновить её"""
@@ -256,6 +428,19 @@ class GoogleSheetsManager:
                     self._record_request()
                     return True
             return False
+        except gspread.exceptions.APIError as e:
+            # Обработка ошибки 429 (превышение лимита)
+            if e.response.status_code == 429:
+                # Добавляем в буфер для повторной попытки
+                self._add_to_buffer(OperationType.UPDATE_ROW, worksheet_name, {'search_col': search_col, 'search_value': search_value, 'new_row': new_row}, priority)
+                if priority == PRIORITY_LOW:
+                    return False
+                else:
+                    logger.warning(f"Превышен лимит API при обновлении строки в {worksheet_name}, добавлено в буфер")
+                    return False
+            else:
+                logger.error(f"Ошибка обновления строки в {worksheet_name}: {e}")
+                return False
         except Exception as e:
             logger.error(f"Ошибка обновления строки в {worksheet_name}: {e}")
             return False
@@ -321,6 +506,19 @@ class GoogleSheetsManager:
             worksheet.update(cell, value, value_input_option='RAW')
             self._record_request()
             return True
+        except gspread.exceptions.APIError as e:
+            # Обработка ошибки 429 (превышение лимита)
+            if e.response.status_code == 429:
+                # Добавляем в буфер для повторной попытки
+                self._add_to_buffer(OperationType.SET_CELL, worksheet_name, {'cell': cell, 'value': value}, priority)
+                if priority == PRIORITY_LOW:
+                    return False
+                else:
+                    logger.warning(f"Превышен лимит API при записи ячейки {cell} в {worksheet_name}, добавлено в буфер")
+                    return False
+            else:
+                logger.error(f"Ошибка записи ячейки {cell} в {worksheet_name}: {e}")
+                return False
         except Exception as e:
-            logger.error(f"Ошибка записи ячейки {cell} в {worksheet_name}: {e}")
+            logger.error(f"Ошибка записи ячейки {worksheet_name}: {e}")
             return False

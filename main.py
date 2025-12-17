@@ -1662,6 +1662,14 @@ async def main():
     asyncio.create_task(flush_log_buffer())
     logger.info("Запущена задача для отправки буферизованных логов")
     
+    # Запускаем задачу для периодической отправки всех буферизованных операций в Google Sheets
+    if schedule_manager.sheets_manager:
+        schedule_manager.sheets_manager.start_buffer_flusher()
+    if employee_manager.sheets_manager:
+        employee_manager.sheets_manager.start_buffer_flusher()
+    if admin_manager.sheets_manager:
+        admin_manager.sheets_manager.start_buffer_flusher()
+    
     # Удаляем вебхук и запускаем polling
     try:
         await bot.delete_webhook(drop_pending_updates=True)
