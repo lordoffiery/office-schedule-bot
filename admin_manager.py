@@ -43,8 +43,32 @@ class AdminManager:
         initial_admins = self.admins.copy()
         self.admins = set(ADMIN_IDS)  # Начинаем с админов из config
         
-        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
-        if self.sheets_manager and self.sheets_manager.is_available():
+        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
+        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
+        if not os.path.exists(ADMINS_FILE):
+            os.makedirs(DATA_DIR, exist_ok=True)
+            # Сохраняем начальных админов в файл
+            self._save_admins()
+            return
+        
+        try:
+            with open(ADMINS_FILE, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        admin_id = int(line)
+                        self.admins.add(admin_id)
+                    except ValueError:
+                        continue
+        except Exception as e:
+            logger.error(f"Ошибка загрузки администраторов: {e}")
+        
+        # Если не загрузилось из файла, пробуем загрузить из Google Sheets
+        # (но только если нет буферизованных операций, чтобы не перезаписать актуальные данные)
+        # Проверяем, были ли загружены админы из файла (кроме начальных из config)
+        if len(self.admins) == len(ADMIN_IDS) and self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для листа admins
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_ADMINS)
             
@@ -69,30 +93,9 @@ class AdminManager:
                         self._save_admins()
                         return
                 except Exception as e:
-                    logger.warning(f"Ошибка загрузки администраторов из Google Sheets: {e}, используем файлы")
+                    logger.warning(f"Ошибка загрузки администраторов из Google Sheets: {e}")
             else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_ADMINS}, используем локальные файлы")
-        
-        # Загружаем из файла
-        if not os.path.exists(ADMINS_FILE):
-            os.makedirs(DATA_DIR, exist_ok=True)
-            # Сохраняем начальных админов в файл
-            self._save_admins()
-            return
-        
-        try:
-            with open(ADMINS_FILE, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        admin_id = int(line)
-                        self.admins.add(admin_id)
-                    except ValueError:
-                        continue
-        except Exception as e:
-            logger.error(f"Ошибка загрузки администраторов: {e}")
+                logger.debug(f"Есть буферизованные операции для {SHEET_ADMINS}, пропускаем загрузку из Google Sheets")
     
     def _save_admins(self):
         """Сохранить список администраторов в файл или Google Sheets"""

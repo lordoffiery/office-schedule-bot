@@ -127,6 +127,41 @@ class EmployeeManager:
                         self.approved_by_admin[telegram_id] = True
         except Exception as e:
             logger.error(f"Ошибка загрузки сотрудников: {e}")
+        
+        # Если не загрузилось из файла, пробуем загрузить из Google Sheets
+        # (но только если нет буферизованных операций, чтобы не перезаписать актуальные данные)
+        if not self.employees and self.sheets_manager and self.sheets_manager.is_available():
+            # Проверяем, есть ли буферизованные операции для листа employees
+            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_EMPLOYEES)
+            
+            if not has_buffered:
+                try:
+                    rows = self.sheets_manager.read_all_rows(SHEET_EMPLOYEES)
+                    rows = filter_empty_rows(rows)
+                    start_idx, _ = get_header_start_idx(rows, ['manual_name', 'Имя вручную'])
+                    loaded_from_sheets = False
+                    for row in rows[start_idx:]:
+                        if len(row) >= 3:
+                            try:
+                                manual_name = row[0].strip() if row[0] else ""
+                                telegram_name = row[1].strip() if row[1] else ""
+                                telegram_id = int(row[2].strip())
+                                username = row[3].strip() if len(row) >= 4 and row[3] else None
+                                
+                                self.employees[telegram_id] = (manual_name, telegram_name, username)
+                                self.name_to_id[manual_name] = telegram_id
+                                self.approved_by_admin[telegram_id] = True
+                                loaded_from_sheets = True
+                            except (ValueError, IndexError):
+                                continue
+                    # Если Google Sheets доступен, используем его как источник истины (даже если пуст)
+                    if loaded_from_sheets or (rows and len(rows) > start_idx):
+                        logger.info(f"Сотрудники загружены из Google Sheets: {len(self.employees)} записей")
+                        return
+                except Exception as e:
+                    logger.warning(f"Ошибка загрузки сотрудников из Google Sheets: {e}")
+            else:
+                logger.debug(f"Есть буферизованные операции для {SHEET_EMPLOYEES}, пропускаем загрузку из Google Sheets")
     
     def _save_employees(self):
         """Сохранить список сотрудников в файл или Google Sheets"""
@@ -210,33 +245,8 @@ class EmployeeManager:
         # Очищаем текущие данные
         self.pending_employees = {}
         
-        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
-        if self.sheets_manager and self.sheets_manager.is_available():
-            # Проверяем, есть ли буферизованные операции для листа pending_employees
-            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_PENDING_EMPLOYEES)
-            
-            if not has_buffered:
-                try:
-                    rows = self.sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
-                    rows = filter_empty_rows(rows)
-                    start_idx, _ = get_header_start_idx(rows, ['username', 'Username'])
-                    loaded_from_sheets = False
-                    for row in rows[start_idx:]:
-                        if len(row) >= 2 and row[0] and row[1]:
-                            username = row[0].strip().lower()
-                            manual_name = row[1].strip()
-                            self.pending_employees[username] = manual_name
-                            loaded_from_sheets = True
-                    # Если Google Sheets доступен, используем его как источник истины (даже если пуст)
-                    if loaded_from_sheets or (rows and len(rows) > start_idx):
-                        logger.info(f"Отложенные записи загружены из Google Sheets: {len(self.pending_employees)} записей")
-                        return
-                except Exception as e:
-                    logger.warning(f"Ошибка загрузки отложенных записей из Google Sheets: {e}, используем файлы")
-            else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_PENDING_EMPLOYEES}, используем локальные файлы")
-        
-        # Загружаем из файла
+        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
+        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
         if not os.path.exists(PENDING_EMPLOYEES_FILE):
             return
         

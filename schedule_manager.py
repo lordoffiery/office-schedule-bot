@@ -146,6 +146,42 @@ class ScheduleManager:
             except (json.JSONDecodeError, Exception) as e:
                 logger.error(f"Ошибка загрузки расписания по умолчанию: {e}")
         
+        # Если не загрузилось из файла, пробуем загрузить из Google Sheets
+        # (но только если нет буферизованных операций, чтобы не перезаписать актуальные данные)
+        if not schedule and self.sheets_manager and self.sheets_manager.is_available():
+            # Проверяем, есть ли буферизованные операции для листа default_schedule
+            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_DEFAULT_SCHEDULE)
+            
+            if not has_buffered:
+                try:
+                    rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
+                    rows = filter_empty_rows(rows)
+                    start_idx, _ = get_header_start_idx(rows, ['day', 'day_name', 'День'])
+                    for row in rows[start_idx:]:
+                        if len(row) >= 2:
+                            try:
+                                day_name = row[0].strip()
+                                # Пытаемся распарсить как JSON
+                                if row[1].strip().startswith('{'):
+                                    places_dict = json.loads(row[1].strip())
+                                    schedule[day_name] = places_dict
+                                else:
+                                    # Старый формат (список через запятую) - конвертируем
+                                    employees_str = row[1].strip() if row[1] else ""
+                                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                    # Конвертируем в новый формат
+                                    places_dict = {}
+                                    for i, emp in enumerate(employees, 1):
+                                        places_dict[f'1.{i}'] = emp
+                                    schedule[day_name] = places_dict
+                            except (ValueError, IndexError, json.JSONDecodeError) as e:
+                                logger.warning(f"Ошибка парсинга строки расписания: {e}")
+                                continue
+                except Exception as e:
+                    logger.warning(f"Ошибка загрузки расписания по умолчанию из Google Sheets: {e}, используем config")
+            else:
+                logger.debug(f"Есть буферизованные операции для {SHEET_DEFAULT_SCHEDULE}, пропускаем загрузку из Google Sheets")
+        
         # Если не загрузилось, используем из config
         if not schedule:
             schedule = DEFAULT_SCHEDULE.copy()
@@ -332,45 +368,8 @@ class ScheduleManager:
         date_str = date.strftime('%Y-%m-%d')
         schedule = {}
         
-        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
-        if self.sheets_manager and self.sheets_manager.is_available():
-            # Проверяем, есть ли буферизованные операции для листа schedules
-            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_SCHEDULES)
-            
-            if not has_buffered:
-                try:
-                    rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
-                    rows = filter_empty_rows(rows)
-                    start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
-                    for row in rows[start_idx:]:
-                        if len(row) >= 3 and row[0] and row[0].strip() == date_str:
-                            try:
-                                day_name = row[1].strip()
-                                employees_str = row[2].strip() if row[2] else ""
-                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                                
-                                # Форматируем имена, если нужно
-                                if employee_manager:
-                                    formatted_employees = []
-                                    for emp in employees:
-                                        if '(@' in emp and emp.endswith(')'):
-                                            formatted_employees.append(emp)
-                                        else:
-                                            formatted_employees.append(employee_manager.format_employee_name(emp))
-                                    schedule[day_name] = formatted_employees
-                                else:
-                                    schedule[day_name] = employees
-                            except (ValueError, IndexError):
-                                continue
-                    # Если загрузили из Google Sheets, возвращаем результат
-                    if schedule:
-                        return schedule
-                except Exception as e:
-                    logger.warning(f"Ошибка загрузки расписания из Google Sheets: {e}, используем файлы")
-            else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_SCHEDULES}, используем локальные файлы")
-        
-        # Загружаем из файла
+        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
+        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
         schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
         if os.path.exists(schedule_file):
             try:
@@ -598,39 +597,8 @@ class ScheduleManager:
         date_str = date.strftime('%Y-%m-%d')
         queue = []
         
-        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
-        if self.sheets_manager and self.sheets_manager.is_available():
-            # Проверяем, есть ли буферизованные операции для листа queue
-            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_QUEUE)
-            
-            if not has_buffered:
-                try:
-                    rows = self.sheets_manager.read_all_rows(SHEET_QUEUE)
-                    rows = filter_empty_rows(rows)
-                    start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
-                    for row in rows[start_idx:]:
-                        if len(row) >= 3 and row[0] == date_str:
-                            try:
-                                employee_name = row[1].strip()
-                                telegram_id = int(row[2].strip())
-                                queue.append({
-                                    'employee_name': employee_name,
-                                    'telegram_id': telegram_id
-                                })
-                            except (ValueError, IndexError):
-                                continue
-                    # Если загрузили из Google Sheets (даже если очередь пуста), возвращаем результат
-                    # Проверяем, есть ли вообще записи для этой даты в Google Sheets
-                    # Если есть хотя бы одна запись (даже не для этой даты), значит Google Sheets используется
-                    if rows and len(rows) > start_idx:
-                        # В Google Sheets есть данные, возвращаем очередь (даже если пуста для этой даты)
-                        return queue
-                except Exception as e:
-                    logger.warning(f"Ошибка загрузки очереди из Google Sheets: {e}, используем файлы")
-            else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_QUEUE}, используем локальные файлы")
-        
-        # Загружаем из файла
+        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
+        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
         if os.path.exists(queue_file):
             try:
@@ -797,61 +765,8 @@ class ScheduleManager:
         week_str = week_start.strftime('%Y-%m-%d')
         requests_dict = {}  # Ключ: (employee_name, telegram_id), значение: заявка
         
-        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
-        if self.sheets_manager and self.sheets_manager.is_available():
-            # Проверяем, есть ли буферизованные операции для листа requests
-            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_REQUESTS)
-            
-            if not has_buffered:
-                try:
-                    rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
-                    rows = filter_empty_rows(rows)
-                    start_idx, _ = get_header_start_idx(rows, ['week_start', 'week', 'Неделя', 'employee_name'])
-                    for row in rows[start_idx:]:
-                        if len(row) < 5 or not row[0] or row[0] != week_str:
-                            continue
-                        try:
-                            employee_name = row[1].strip()
-                            telegram_id = int(row[2].strip())
-                            days_requested = [d.strip() for d in row[3].split(',') if d.strip()] if row[3] else []
-                            days_skipped = [d.strip() for d in row[4].split(',') if d.strip()] if row[4] else []
-                            
-                            key = (employee_name, telegram_id)
-                            
-                            # Если уже есть заявка для этого сотрудника, объединяем
-                            if key in requests_dict:
-                                existing = requests_dict[key]
-                                combined_requested = list(dict.fromkeys(existing['days_requested'] + days_requested))
-                                combined_skipped = list(dict.fromkeys(existing['days_skipped'] + days_skipped))
-                                combined_requested = [d for d in combined_requested if d not in combined_skipped]
-                                
-                                requests_dict[key] = {
-                                    'employee_name': employee_name,
-                                    'telegram_id': telegram_id,
-                                    'days_requested': combined_requested,
-                                    'days_skipped': combined_skipped
-                                }
-                            else:
-                                requests_dict[key] = {
-                                    'employee_name': employee_name,
-                                    'telegram_id': telegram_id,
-                                    'days_requested': days_requested,
-                                    'days_skipped': days_skipped
-                                }
-                        except (ValueError, IndexError):
-                            continue
-                    # Если загрузили из Google Sheets (даже если заявок нет для этой недели), возвращаем результат
-                    # Проверяем, есть ли вообще записи в Google Sheets
-                    # Если есть хотя бы одна запись (даже не для этой недели), значит Google Sheets используется
-                    if rows and len(rows) > start_idx:
-                        # В Google Sheets есть данные, возвращаем заявки (даже если пусто для этой недели)
-                        return list(requests_dict.values())
-                except Exception as e:
-                    logger.warning(f"Ошибка загрузки заявок из Google Sheets: {e}, используем файлы")
-            else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_REQUESTS}, используем локальные файлы")
-        
-        # Загружаем из файла
+        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
+        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
         if not os.path.exists(request_file):
             return []
