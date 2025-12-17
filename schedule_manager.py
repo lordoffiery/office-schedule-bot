@@ -912,11 +912,115 @@ class ScheduleManager:
         if os.path.exists(request_file):
             os.remove(request_file)
     
+    def _calculate_employee_days_count(self, default_schedule: Dict[str, Dict[str, str]], employee_name: str) -> int:
+        """
+        Подсчитать количество дней в неделю для сотрудника в расписании по умолчанию
+        
+        Args:
+            default_schedule: Расписание по умолчанию в формате {день: {место: имя}}
+            employee_name: Имя сотрудника
+            
+        Returns:
+            int: Количество дней в неделю
+        """
+        count = 0
+        for day_name, places_dict in default_schedule.items():
+            for place_key, name in places_dict.items():
+                plain_name = self.get_plain_name_from_formatted(name)
+                if plain_name == employee_name:
+                    count += 1
+                    break
+        return count
+    
+    def _assign_fixed_places(self, default_schedule: Dict[str, Dict[str, str]], 
+                             schedule: Dict[str, Dict[str, str]], 
+                             employee_manager) -> Dict[str, str]:
+        """
+        Назначить фиксированные места сотрудникам на основе приоритета (количество дней в неделю)
+        
+        Args:
+            default_schedule: Расписание по умолчанию
+            schedule: Текущее расписание (будет изменено)
+            employee_manager: Менеджер сотрудников
+            
+        Returns:
+            Dict[str, str]: Маппинг {имя_сотрудника: место} (например, {"Вася": "1.1"})
+        """
+        # Собираем всех сотрудников из default_schedule
+        employees_info = {}  # {имя: {дни: {день: место}, days_count: количество}}
+        
+        for day_name, places_dict in default_schedule.items():
+            for place_key, name in places_dict.items():
+                plain_name = self.get_plain_name_from_formatted(name)
+                if plain_name:
+                    if plain_name not in employees_info:
+                        employees_info[plain_name] = {
+                            'days': {},
+                            'days_count': 0
+                        }
+                    employees_info[plain_name]['days'][day_name] = place_key
+        
+        # Подсчитываем количество дней для каждого сотрудника
+        for employee_name in employees_info:
+            employees_info[employee_name]['days_count'] = len(employees_info[employee_name]['days'])
+        
+        # Сортируем сотрудников по количеству дней (по убыванию), затем по месту из первого дня
+        sorted_employees = sorted(
+            employees_info.items(),
+            key=lambda x: (
+                -x[1]['days_count'],  # Сначала по количеству дней (по убыванию)
+                int(list(x[1]['days'].values())[0].split('.')[0]) if x[1]['days'] else 999,  # Затем по подразделению
+                int(list(x[1]['days'].values())[0].split('.')[1]) if x[1]['days'] else 999  # Затем по месту
+            )
+        )
+        
+        # Назначаем фиксированные места
+        employee_to_place = {}  # {имя: место}
+        place_to_employee = {}  # {место: имя} - для отслеживания конфликтов
+        
+        for employee_name, info in sorted_employees:
+            days_dict = info['days']  # {день: место}
+            days_list = list(days_dict.keys())
+            
+            # Находим место, которое сотрудник занимает в большинстве дней (или первое место)
+            place_counts = {}
+            for day, place in days_dict.items():
+                place_counts[place] = place_counts.get(place, 0) + 1
+            
+            # Выбираем место, которое встречается чаще всего (или первое, если равны)
+            most_common_place = max(place_counts.items(), key=lambda x: (x[1], -int(x[0].split('.')[0]), -int(x[0].split('.')[1])))[0]
+            
+            # Пытаемся использовать это место
+            assigned_place = None
+            
+            # Проверяем, не занято ли это место сотрудником с более высоким приоритетом
+            if most_common_place not in place_to_employee:
+                # Место свободно - используем его
+                assigned_place = most_common_place
+            else:
+                # Место занято - ищем свободное место
+                # Ищем первое свободное место (начинаем с первого подразделения)
+                for i in range(1, MAX_OFFICE_SEATS + 1):
+                    candidate_place = f'1.{i}'
+                    if candidate_place not in place_to_employee:
+                        assigned_place = candidate_place
+                        break
+            
+            if assigned_place:
+                employee_to_place[employee_name] = assigned_place
+                place_to_employee[assigned_place] = employee_name
+                # Назначаем место сотруднику во все его дни
+                for day in days_list:
+                    if day in schedule:
+                        schedule[day][assigned_place] = employee_name
+        
+        return employee_to_place
+    
     def build_schedule_from_requests(self, week_start: datetime, 
                                      requests: List[Dict],
                                      employee_manager) -> Dict[str, List[str]]:
         """
-        Построить расписание на основе заявок
+        Построить расписание на основе заявок с сохранением фиксированных мест
         
         Returns:
             Dict[str, List[str]] - расписание в формате {день: [имена]} для обратной совместимости
@@ -924,26 +1028,41 @@ class ScheduleManager:
         # Начинаем с расписания по умолчанию (в новом формате JSON)
         default_schedule = self.load_default_schedule()
         
-        # Конвертируем в рабочий формат (копируем, чтобы не изменять оригинал)
+        # Копируем расписание по умолчанию (но очищаем имена, оставляя только структуру мест)
         schedule = {}
         for day_name, places_dict in default_schedule.items():
-            schedule[day_name] = places_dict.copy()
+            schedule[day_name] = {}
+            # Копируем структуру мест, но очищаем значения
+            for place_key in places_dict.keys():
+                schedule[day_name][place_key] = ''
         
-        # Для каждого сотрудника с заявкой:
-        # 1. Удаляем его из дней, которые он пропустил
-        # 2. Добавляем его в дни, которые он запросил дополнительно (если есть место)
+        # Шаг 1: Назначаем фиксированные места сотрудникам на основе приоритета
+        employee_to_place = self._assign_fixed_places(default_schedule, schedule, employee_manager)
+        
+        # Шаг 2: Применяем заявки (skip_day, add_day)
+        # Создаем словарь заявок по сотрудникам
+        requests_by_employee = {}
         for req in requests:
             employee_name = req['employee_name']
-            days_requested = req['days_requested']
-            days_skipped = req['days_skipped']
+            requests_by_employee[employee_name] = {
+                'days_requested': req['days_requested'],
+                'days_skipped': req['days_skipped']
+            }
+        
+        # Обрабатываем заявки
+        for employee_name, req_info in requests_by_employee.items():
+            days_requested = req_info['days_requested']
+            days_skipped = req_info['days_skipped']
+            
+            # Получаем фиксированное место сотрудника (если есть)
+            fixed_place = employee_to_place.get(employee_name)
             
             # Удаляем сотрудника из пропущенных дней
             for day in days_skipped:
-                if day in schedule:
-                    place_key = self._find_employee_in_places(schedule[day], employee_name)
-                    if place_key:
-                        # Освобождаем место
-                        schedule[day][place_key] = ''
+                if day in schedule and fixed_place:
+                    # Освобождаем место
+                    if fixed_place in schedule[day]:
+                        schedule[day][fixed_place] = ''
             
             # Добавляем сотрудника в запрошенные дни (которые не в пропусках)
             for day in days_requested:
@@ -951,10 +1070,21 @@ class ScheduleManager:
                     # Проверяем, есть ли уже сотрудник в расписании
                     place_key = self._find_employee_in_places(schedule[day], employee_name)
                     if not place_key:
-                        # Ищем свободное место (начинаем с первого подразделения)
-                        free_place = self._find_free_place(schedule[day], department=1)
-                        if free_place:
-                            schedule[day][free_place] = employee_name
+                        # Если у сотрудника есть фиксированное место, используем его
+                        if fixed_place:
+                            # Проверяем, свободно ли место
+                            if fixed_place not in schedule[day] or not schedule[day].get(fixed_place):
+                                schedule[day][fixed_place] = employee_name
+                            else:
+                                # Место занято - ищем свободное
+                                free_place = self._find_free_place(schedule[day], department=1)
+                                if free_place:
+                                    schedule[day][free_place] = employee_name
+                        else:
+                            # У сотрудника нет фиксированного места - ищем свободное
+                            free_place = self._find_free_place(schedule[day], department=1)
+                            if free_place:
+                                schedule[day][free_place] = employee_name
                         # Если места нет, сотрудник не добавляется (работает удаленно)
         
         # Конвертируем обратно в формат списка для вывода
