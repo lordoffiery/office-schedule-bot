@@ -1656,6 +1656,27 @@ async def main():
     # Инициализируем данные при первом запуске
     init_all()
     
+    # Явно загружаем данные из Google Sheets при старте бота
+    logger.info("Загрузка данных из Google Sheets при старте...")
+    try:
+        # Перезагружаем данные сотрудников
+        employee_manager.reload_employees()
+        employee_manager.reload_pending_employees()
+        logger.info("✅ Сотрудники загружены")
+        
+        # Перезагружаем администраторов
+        admin_manager.reload_admins()
+        logger.info("✅ Администраторы загружены")
+        
+        # Загружаем расписание по умолчанию (это вызовет загрузку из Google Sheets)
+        schedule_manager.load_default_schedule()
+        logger.info("✅ Расписание по умолчанию загружено")
+        
+        logger.info("✅ Все данные успешно загружены из Google Sheets")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при загрузке данных из Google Sheets: {e}", exc_info=True)
+        logger.warning("Продолжаем работу с локальными файлами...")
+    
     # Запускаем менеджер уведомлений
     notification_manager.start()
     
