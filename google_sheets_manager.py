@@ -217,6 +217,19 @@ class GoogleSheetsManager:
             worksheet.append_row(row, value_input_option='RAW')
             self._record_request()
             return True
+        except gspread.exceptions.APIError as e:
+            # Обработка ошибки 429 (превышение лимита)
+            if e.response.status_code == 429:
+                if priority == PRIORITY_LOW:
+                    # Для логов просто пропускаем, не логируем ошибку
+                    return False
+                else:
+                    # Для высокоприоритетных запросов логируем предупреждение
+                    logger.warning(f"Превышен лимит API при добавлении строки в {worksheet_name}: {e}")
+                    return False
+            else:
+                logger.error(f"Ошибка добавления строки в {worksheet_name}: {e}")
+                return False
         except Exception as e:
             logger.error(f"Ошибка добавления строки в {worksheet_name}: {e}")
             return False
