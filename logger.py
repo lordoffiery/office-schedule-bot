@@ -70,11 +70,16 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
             ]
             # Используем PRIORITY_LOW для логов - они будут пропущены при превышении лимита API
             from google_sheets_manager import PRIORITY_LOW
-            sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
+            success = sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
+            # Если не удалось записать (например, из-за лимита API), просто пропускаем
+            # Не логируем ошибку, чтобы не создавать дополнительную нагрузку
         except Exception as e:
-            # Не прерываем работу, если не удалось записать в Google Sheets
-            # Используем стандартный logger для ошибок
-            logging.warning(f"Ошибка записи лога в Google Sheets: {e}")
+            # Обрабатываем только критические ошибки (не 429)
+            # Ошибка 429 (превышение лимита) обрабатывается внутри append_row и не попадает сюда
+            # Логируем только другие ошибки
+            error_str = str(e)
+            if '429' not in error_str and 'Quota exceeded' not in error_str:
+                logging.warning(f"Ошибка записи лога в Google Sheets: {e}")
     else:
         # Если Google Sheets недоступен, используем стандартный logger (но не файл)
         logger.info(log_message)

@@ -89,8 +89,19 @@ class GoogleSheetsManager:
         while self.request_times and self.request_times[0] < now - API_TIME_WINDOW:
             self.request_times.popleft()
         
+        # Для низкоприоритетных запросов (логи) используем более строгий лимит
+        # Оставляем запас для высокоприоритетных запросов
+        low_priority_limit = int(API_RATE_LIMIT * 0.7)  # 70% лимита для логов
+        high_priority_limit = API_RATE_LIMIT
+        
+        if priority == PRIORITY_LOW:
+            # Для логов - пропускаем, если уже много запросов
+            if len(self.request_times) >= low_priority_limit:
+                logger.debug(f"Пропущен низкоприоритетный запрос (логи) из-за лимита API ({len(self.request_times)}/{low_priority_limit} запросов)")
+                return False
+        
         # Если запросов меньше лимита - можно выполнить
-        if len(self.request_times) < API_RATE_LIMIT:
+        if len(self.request_times) < high_priority_limit:
             return True
         
         # Если запросов достигнут лимит:
