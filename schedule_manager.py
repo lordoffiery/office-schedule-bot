@@ -1222,4 +1222,103 @@ class ScheduleManager:
                 formatted_name = self.employee_manager.format_employee_name_by_id(telegram_id)
                 # Обновляем имя в расписании
                 self.update_employee_name_in_default_schedule(manual_name, formatted_name)
+    
+    def refresh_all_schedules_with_usernames(self):
+        """
+        Обновить все имена сотрудников в default_schedule и schedules на основе данных из employees.
+        Используется для синхронизации после ручного добавления сотрудников в Google Sheets.
+        
+        Returns:
+            tuple: (updated_default_count, updated_schedules_count) - количество обновленных записей
+        """
+        if not self.employee_manager:
+            return 0, 0
+        
+        # Перезагружаем данные сотрудников из Google Sheets
+        self.employee_manager.reload_employees()
+        
+        updated_default_count = 0
+        updated_schedules_count = 0
+        
+        # Обновляем default_schedule
+        default_schedule = self.load_default_schedule()
+        for day_name, places_dict in default_schedule.items():
+            for place_key, name in places_dict.items():
+                if name:  # Если место не пустое
+                    plain_name = self.get_plain_name_from_formatted(name)
+                    # Ищем сотрудника по имени
+                    telegram_id = self.employee_manager.get_employee_id(plain_name)
+                    if telegram_id:
+                        formatted_name = self.employee_manager.format_employee_name_by_id(telegram_id)
+                        # Если имя изменилось (добавился username), обновляем
+                        if formatted_name != name:
+                            default_schedule[day_name][place_key] = formatted_name
+                            updated_default_count += 1
+        
+        # Сохраняем обновленный default_schedule
+        if updated_default_count > 0:
+            self.save_default_schedule(default_schedule)
+            logger.info(f"Обновлено {updated_default_count} имен в default_schedule")
+        
+        # Обновляем schedules в Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                rows = filter_empty_rows(rows)
+                start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+                
+                rows_to_save = []
+                
+                # Сохраняем заголовок
+                if has_header:
+                    rows_to_save.append(rows[0])
+                else:
+                    rows_to_save.append(['date', 'day_name', 'employees'])
+                
+                # Обрабатываем все строки
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[2]:  # Проверяем, что есть список сотрудников
+                        employees_str = row[2].strip()
+                        employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                        
+                        # Обновляем имена сотрудников
+                        updated_row = False
+                        new_employees = []
+                        for emp in employees:
+                            plain_name = self.get_plain_name_from_formatted(emp)
+                            # Ищем сотрудника по имени
+                            telegram_id = self.employee_manager.get_employee_id(plain_name)
+                            if telegram_id:
+                                formatted_name = self.employee_manager.format_employee_name_by_id(telegram_id)
+                                # Если имя изменилось (добавился username), обновляем
+                                if formatted_name != emp:
+                                    new_employees.append(formatted_name)
+                                    updated_row = True
+                                    updated_schedules_count += 1
+                                else:
+                                    new_employees.append(emp)
+                            else:
+                                # Сотрудник не найден, оставляем как есть
+                                new_employees.append(emp)
+                        
+                        if updated_row:
+                            # Обновляем строку с новым списком сотрудников
+                            new_row = row.copy()
+                            new_row[2] = ', '.join(new_employees)
+                            rows_to_save.append(new_row)
+                        else:
+                            # Оставляем строку без изменений
+                            rows_to_save.append(row)
+                    else:
+                        # Оставляем строку без изменений (некорректный формат)
+                        rows_to_save.append(row)
+                
+                # Сохраняем обновленные данные
+                if updated_schedules_count > 0:
+                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
+                    logger.info(f"Обновлено {updated_schedules_count} имен в schedules")
+            except Exception as e:
+                logger.error(f"Ошибка обновления schedules: {e}")
+        
+        return updated_default_count, updated_schedules_count
 

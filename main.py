@@ -1379,6 +1379,43 @@ async def cmd_admin_set_default_schedule(message: Message):
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
 
 
+@dp.message(Command("admin_refresh_schedules"))
+async def cmd_admin_refresh_schedules(message: Message):
+    """Обновить имена сотрудников в schedules и default_schedule (только для админов)"""
+    user_id = message.from_user.id
+    user_info = get_user_info(message)
+    
+    if not admin_manager.is_admin(user_id):
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_schedules", response)
+        return
+    
+    response = "🔄 Начинаю обновление расписаний..."
+    await message.reply(response)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_schedules", response)
+    
+    try:
+        # Перезагружаем данные сотрудников из Google Sheets
+        employee_manager.reload_employees()
+        
+        # Обновляем расписания
+        updated_default, updated_schedules = schedule_manager.refresh_all_schedules_with_usernames()
+        
+        response = (
+            f"✅ Обновление завершено:\n\n"
+            f"📋 default_schedule: обновлено {updated_default} записей\n"
+            f"📅 schedules: обновлено {updated_schedules} записей\n\n"
+            f"Все имена сотрудников синхронизированы с данными из таблицы employees."
+        )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_schedules", response)
+    except Exception as e:
+        response = f"❌ Ошибка при обновлении расписаний: {e}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_schedules", response)
+
+
 @dp.message(Command("admin_skip_day"))
 async def cmd_admin_skip_day(message: Message):
     """Пропустить день для сотрудника (только для админов, можно указать несколько дат)"""
