@@ -59,17 +59,6 @@ class GoogleSheetsManager:
         self.operation_buffer: deque = deque(maxlen=5000)  # Максимум 5000 операций
         self._buffer_flusher_task = None
         self._init_client()
-
-
-class GoogleSheetsManager:
-    """Класс для управления данными через Google Sheets"""
-    
-    def __init__(self):
-        self.client = None
-        self.spreadsheet = None
-        # Отслеживание запросов для контроля лимитов API
-        self.request_times = deque()  # Временные метки последних запросов
-        self._init_client()
     
     def _init_client(self):
         """Инициализировать клиент Google Sheets"""
@@ -310,6 +299,8 @@ class GoogleSheetsManager:
         Returns:
             True если есть буферизованные операции для этого листа, False иначе
         """
+        if not hasattr(self, 'operation_buffer'):
+            return False
         return any(op.worksheet_name == worksheet_name for op in self.operation_buffer)
     
     async def _flush_operation_buffer(self):
