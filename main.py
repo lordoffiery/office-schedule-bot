@@ -79,6 +79,30 @@ def day_to_short(day: str) -> str:
     return day_map.get(day, day[:2])
 
 
+def format_schedule_with_places(schedule: dict) -> str:
+    """
+    Форматировать расписание с указанием мест для каждого сотрудника
+    
+    Args:
+        schedule: Dict[str, List[str]] - расписание в формате {день: [имена]}
+        
+    Returns:
+        str - отформатированное расписание с местами
+    """
+    result = []
+    for day, employees in schedule.items():
+        if employees:
+            # Форматируем список сотрудников с местами
+            employees_with_places = []
+            for i, emp in enumerate(employees, 1):
+                place = f"1.{i}"
+                employees_with_places.append(f"{place}: {emp}")
+            result.append(f"{day}: {', '.join(employees_with_places)}")
+        else:
+            result.append(f"{day}: (пусто)")
+    return "\n".join(result)
+
+
 def format_schedule_message(employee_schedule: dict, week_start: datetime) -> str:
     """Форматировать сообщение с расписанием"""
     week_dates = schedule_manager.get_week_dates(week_start)
@@ -391,15 +415,44 @@ async def cmd_my_schedule(message: Message):
         requests = schedule_manager.load_requests_for_week(current_week_start)
         schedule = schedule_manager.build_schedule_from_requests(current_week_start, requests, employee_manager)
     
-    # Получаем расписание сотрудника из построенного расписания
+    # Получаем расписание сотрудника из построенного расписания с местами
     employee_schedule = {}
+    employee_places = {}  # Словарь для хранения мест сотрудника
     formatted_name = employee_manager.format_employee_name(employee_name)
     
     for date, day_name in week_dates:
         employees = schedule.get(day_name, [])
         employee_schedule[day_name] = formatted_name in employees
+        # Находим место сотрудника (если он в офисе)
+        if formatted_name in employees:
+            place_index = employees.index(formatted_name) + 1
+            employee_places[day_name] = f"1.{place_index}"
+        else:
+            employee_places[day_name] = None
     
-    message_text = format_schedule_message(employee_schedule, current_week_start)
+    # Форматируем сообщение с местами
+    week_str = f"{week_dates[0][0].strftime('%d.%m')} - {week_dates[-1][0].strftime('%d.%m.%Y')}"
+    
+    office_days = [day for day, in_office in employee_schedule.items() if in_office]
+    remote_days = [day for day, in_office in employee_schedule.items() if not in_office]
+    
+    message_text = f"📅 Ваше расписание на неделю {week_str}:\n\n"
+    
+    if office_days:
+        office_days_with_places = []
+        for day in office_days:
+            place = employee_places.get(day)
+            day_short = day_to_short(day)
+            if place:
+                office_days_with_places.append(f"{day_short} (место {place})")
+            else:
+                office_days_with_places.append(day_short)
+        message_text += f"🏢 Дни в офисе: {', '.join(office_days_with_places)}\n"
+    
+    if remote_days:
+        remote_days_short = [day_to_short(day) for day in remote_days]
+        message_text += f"🏠 Дни удаленно: {', '.join(remote_days_short)}\n"
+    
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", message_text)
 
@@ -778,9 +831,7 @@ async def cmd_full_schedule(message: Message):
         schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
     
     message_text = f"📅 Расписание на {date.strftime('%d.%m.%Y')}:\n\n"
-    for day, employees in schedule.items():
-        # Имена уже отформатированы
-        message_text += f"{day}: {', '.join(employees)}\n"
+    message_text += format_schedule_with_places(schedule)
     
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", message_text[:200])

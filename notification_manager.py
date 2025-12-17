@@ -121,13 +121,20 @@ class NotificationManager:
         week_dates = self.schedule_manager.get_week_dates(next_week_start)
         
         for employee_name, telegram_id in all_employees.items():
-            # Получаем расписание сотрудника из уже построенного расписания
+            # Получаем расписание сотрудника из уже построенного расписания с местами
             employee_schedule = {}
+            employee_places = {}  # Словарь для хранения мест сотрудника
             formatted_name = self.employee_manager.format_employee_name(employee_name)
             
             for date, day_name in week_dates:
                 employees = schedule.get(day_name, [])
                 employee_schedule[day_name] = formatted_name in employees
+                # Находим место сотрудника (если он в офисе)
+                if formatted_name in employees:
+                    place_index = employees.index(formatted_name) + 1
+                    employee_places[day_name] = f"1.{place_index}"
+                else:
+                    employee_places[day_name] = None
             
             # Определяем, какие дни были запрошены дополнительно
             # (не были в расписании по умолчанию)
@@ -164,8 +171,15 @@ class NotificationManager:
             message = f"📅 Ваше расписание на неделю {week_str}:\n\n"
             
             if office_days:
-                office_days_short = [day_to_short(day) for day in office_days]
-                message += f"🏢 Дни в офисе: {', '.join(office_days_short)}\n"
+                office_days_with_places = []
+                for day in office_days:
+                    place = employee_places.get(day)
+                    day_short = day_to_short(day)
+                    if place:
+                        office_days_with_places.append(f"{day_short} (место {place})")
+                    else:
+                        office_days_with_places.append(day_short)
+                message += f"🏢 Дни в офисе: {', '.join(office_days_with_places)}\n"
             
             if remote_days:
                 remote_days_short = [day_to_short(day) for day in remote_days]
