@@ -8,10 +8,11 @@ import threading
 from datetime import datetime, timedelta
 from typing import Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import Message
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
+from typing import Callable, Dict, Any, Awaitable
 
 from config import API_TOKEN, ADMIN_IDS, WEEKDAYS_RU, TIMEZONE, MAX_OFFICE_SEATS, SCHEDULES_DIR, SHEET_SCHEDULES
 from employee_manager import EmployeeManager
@@ -1938,15 +1939,21 @@ async def main():
         asyncio.create_task(sync_postgresql_to_sheets_periodically())
         logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждые 10 минут)")
     
-    # Создаем middleware для автоматической синхронизации после каждой команды
-    @dp.message.middleware()
-    class SyncMiddleware:
-        async def __call__(self, handler, event, data):
+    # Регистрируем middleware для автоматической синхронизации после каждой команды
+    class SyncMiddleware(BaseMiddleware):
+        async def __call__(
+            self,
+            handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+            event: Message,
+            data: Dict[str, Any]
+        ) -> Any:
             # Выполняем обработчик команды
             result = await handler(event, data)
             # После выполнения команды запускаем синхронизацию (в фоне)
             await sync_postgresql_to_sheets()
             return result
+    
+    dp.message.middleware(SyncMiddleware())
     
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
     health_thread = threading.Thread(target=start_health_server, daemon=True)
