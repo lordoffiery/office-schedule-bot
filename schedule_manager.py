@@ -36,7 +36,7 @@ if USE_POSTGRESQL:
             save_schedule_to_db, save_default_schedule_to_db, save_request_to_db,
             clear_requests_from_db, add_to_queue_db, remove_from_queue_db,
             load_schedule_from_db, load_default_schedule_from_db,
-            load_requests_from_db, load_queue_from_db, _pool
+            load_requests_from_db, load_queue_from_db
         )
     except ImportError:
         save_schedule_to_db = None
@@ -49,7 +49,6 @@ if USE_POSTGRESQL:
         load_default_schedule_from_db = None
         load_requests_from_db = None
         load_queue_from_db = None
-        _pool = None
 else:
     save_schedule_to_db = None
     save_default_schedule_to_db = None
@@ -61,7 +60,17 @@ else:
     load_default_schedule_from_db = None
     load_requests_from_db = None
     load_queue_from_db = None
-    _pool = None
+
+
+def _get_pool():
+    """Получить пул подключений PostgreSQL (динамический импорт)"""
+    if not USE_POSTGRESQL:
+        return None
+    try:
+        from database import _pool
+        return _pool
+    except ImportError:
+        return None
 
 
 class ScheduleManager:
@@ -110,7 +119,8 @@ class ScheduleManager:
         schedule = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_default_schedule_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_default_schedule_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -247,7 +257,8 @@ class ScheduleManager:
             schedule: Dict[str, Dict[str, str]] - расписание по дням, где внутренний словарь - места (ключ: "подразделение.место")
         """
         # Сохраняем в PostgreSQL (приоритет 1)
-        if USE_POSTGRESQL and _pool and save_default_schedule_to_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and save_default_schedule_to_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -414,7 +425,8 @@ class ScheduleManager:
         week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_schedule_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_schedule_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -471,7 +483,8 @@ class ScheduleManager:
         schedule = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_schedule_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_schedule_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -592,7 +605,8 @@ class ScheduleManager:
         week_dates = self.get_week_dates(week_start)
         
         # Сохраняем в PostgreSQL (приоритет 1)
-        if USE_POSTGRESQL and _pool and save_schedule_to_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and save_schedule_to_db:
             for date, day_name in week_dates:
                 date_str = date.strftime('%Y-%m-%d')
                 employees = schedule.get(day_name, [])
@@ -708,9 +722,10 @@ class ScheduleManager:
         employees_str = ', '.join(employees)
         
         # Сохраняем в PostgreSQL (приоритет 1)
+        pool = _get_pool()
         logger.info(f"🔄 Начинаю сохранение расписания {date_str} ({day_name}) в PostgreSQL...")
-        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
-        if USE_POSTGRESQL and _pool and save_schedule_to_db:
+        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
+        if USE_POSTGRESQL and pool and save_schedule_to_db:
             try:
                 logger.info(f"   Выполняю save_schedule_to_db({date_str}, {day_name}, {len(employees_str)} символов)...")
                 try:
@@ -740,7 +755,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка при сохранении расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         else:
-            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения расписания {date_str}: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
+            pool = _get_pool()
+            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения расписания {date_str}: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -809,9 +825,10 @@ class ScheduleManager:
                 return False  # Уже в очереди
         
         # Сохраняем в PostgreSQL (приоритет 1)
+        pool = _get_pool()
         logger.info(f"🔄 Начинаю добавление в очередь PostgreSQL: {employee_name} на {date_str}...")
-        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
-        if USE_POSTGRESQL and _pool and add_to_queue_db:
+        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
+        if USE_POSTGRESQL and pool and add_to_queue_db:
             try:
                 logger.info(f"   Выполняю add_to_queue_db({date_str}, {employee_name}, {telegram_id})...")
                 try:
@@ -839,7 +856,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Ошибка добавления в очередь в PostgreSQL: {e}", exc_info=True)
         else:
-            logger.warning(f"⚠️ PostgreSQL недоступен для добавления в очередь: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
+            pool = _get_pool()
+            logger.warning(f"⚠️ PostgreSQL недоступен для добавления в очередь: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -864,7 +882,8 @@ class ScheduleManager:
         queue = []
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_queue_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_queue_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -940,7 +959,8 @@ class ScheduleManager:
         logger.info(f"Очередь после удаления: {len(queue)} записей")
         
         # Удаляем из PostgreSQL (приоритет 1)
-        if USE_POSTGRESQL and _pool and remove_from_queue_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and remove_from_queue_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -1059,9 +1079,10 @@ class ScheduleManager:
         days_skip_str = ','.join(days_skipped) if days_skipped else ''
         
         # Сохраняем в PostgreSQL (приоритет 1)
+        pool = _get_pool()
         logger.info(f"🔄 Начинаю сохранение заявки в PostgreSQL: {employee_name} (неделя {week_str})...")
-        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_request_to_db={save_request_to_db is not None}")
-        if USE_POSTGRESQL and _pool and save_request_to_db:
+        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_request_to_db={save_request_to_db is not None}")
+        if USE_POSTGRESQL and pool and save_request_to_db:
             try:
                 logger.info(f"   Выполняю save_request_to_db(неделя={week_str}, сотрудник={employee_name}, ID={telegram_id})...")
                 try:
@@ -1091,7 +1112,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка при сохранении заявки в PostgreSQL: {e}", exc_info=True)
         else:
-            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения заявки: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_request_to_db={save_request_to_db is not None}")
+            pool = _get_pool()
+            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения заявки: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_request_to_db={save_request_to_db is not None}")
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -1131,7 +1153,8 @@ class ScheduleManager:
         requests_dict = {}  # Ключ: (employee_name, telegram_id), значение: заявка
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_requests_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_requests_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -1256,7 +1279,8 @@ class ScheduleManager:
         week_str = week_start.strftime('%Y-%m-%d')
         
         # Удаляем из PostgreSQL (приоритет 1)
-        if USE_POSTGRESQL and _pool and clear_requests_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and clear_requests_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
