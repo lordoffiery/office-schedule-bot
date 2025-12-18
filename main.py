@@ -241,6 +241,8 @@ async def cmd_start(message: Message):
     
     await message.reply(response)
     log_command(user_id, username, user_name, "/start", response)
+    # Запускаем синхронизацию после команды (в фоне)
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("help"))
@@ -1908,44 +1910,43 @@ async def main():
     if admin_manager.sheets_manager:
         admin_manager.sheets_manager.start_buffer_flusher()
     
-    # Запускаем задачу для периодической синхронизации PostgreSQL -> Google Sheets
-    # (Google Sheets используется только как веб-интерфейс, синхронизация выполняется раз в час)
+    # Инициализируем глобальные переменные для синхронизации
+    global _sync_lock
+    _sync_lock = asyncio.Lock()
+    
+    # Запускаем задачу для периодической синхронизации PostgreSQL -> Google Sheets (каждые 10 минут)
     async def sync_postgresql_to_sheets_periodically():
         """Периодическая синхронизация данных из PostgreSQL в Google Sheets"""
         from config import USE_GOOGLE_SHEETS
         if not USE_GOOGLE_SHEETS:
             return
         
-        # Ждем 20 секунд после старта бота перед первой синхронизацией
-        await asyncio.sleep(20)  # 20 секунд
+        # Ждем 1 минуту после старта бота перед первой синхронизацией
+        await asyncio.sleep(60)  # 1 минута
         
         while True:
             try:
-                logger.info("🔄 Начинаю периодическую синхронизацию PostgreSQL -> Google Sheets...")
-                # Импортируем функции синхронизации
-                import subprocess
-                import sys
-                # Запускаем скрипт синхронизации в отдельном процессе
-                result = subprocess.run(
-                    [sys.executable, 'sync_postgresql_to_sheets.py'],
-                    capture_output=True,
-                    text=True,
-                    timeout=300  # 5 минут таймаут
-                )
-                if result.returncode == 0:
-                    logger.info("✅ Синхронизация PostgreSQL -> Google Sheets завершена успешно")
-                else:
-                    logger.warning(f"⚠️ Синхронизация завершилась с ошибкой: {result.stderr}")
+                await sync_postgresql_to_sheets()
             except Exception as e:
-                logger.error(f"❌ Ошибка при синхронизации PostgreSQL -> Google Sheets: {e}", exc_info=True)
+                logger.error(f"❌ Ошибка при периодической синхронизации: {e}", exc_info=True)
             
-            # Ждем 20 секунд до следующей синхронизации
-            await asyncio.sleep(20)  # 20 секунд
+            # Ждем 10 минут до следующей синхронизации
+            await asyncio.sleep(600)  # 10 минут
     
     # Запускаем задачу синхронизации только если PostgreSQL используется
     if use_postgresql:
         asyncio.create_task(sync_postgresql_to_sheets_periodically())
-        logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждые 20 секунд)")
+        logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждые 10 минут)")
+    
+    # Создаем middleware для автоматической синхронизации после каждой команды
+    @dp.message.middleware()
+    class SyncMiddleware:
+        async def __call__(self, handler, event, data):
+            # Выполняем обработчик команды
+            result = await handler(event, data)
+            # После выполнения команды запускаем синхронизацию (в фоне)
+            await sync_postgresql_to_sheets()
+            return result
     
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
     health_thread = threading.Thread(target=start_health_server, daemon=True)
