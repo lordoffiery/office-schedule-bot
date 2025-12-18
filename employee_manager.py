@@ -93,9 +93,12 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
+                    logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_employees_from_db")
                     future = asyncio.run_coroutine_threadsafe(load_employees_from_db(), loop)
-                    db_employees = future.result(timeout=10)
+                    db_employees = future.result(timeout=30)
+                    logger.debug("load_employees_from_db завершен успешно")
                 except RuntimeError:
+                    logger.debug("Event loop не запущен, используем asyncio.run для load_employees_from_db")
                     db_employees = asyncio.run(load_employees_from_db())
                 except Exception as e:
                     logger.warning(f"Ошибка при выполнении load_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
@@ -252,7 +255,7 @@ class EmployeeManager:
                         save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved),
                         loop
                     )
-                    future.result(timeout=10)  # Ждем результат
+                    future.result(timeout=30)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved))
             except Exception as e:
@@ -320,7 +323,7 @@ class EmployeeManager:
                         save_employee_to_db(telegram_id, name, telegram_name, username, True),
                         loop
                     )
-                    future.result(timeout=10)  # Ждем результат
+                    future.result(timeout=30)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, name, telegram_name, username, True))
             except Exception as e:
@@ -367,9 +370,12 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
+                    logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_pending_employees_from_db")
                     future = asyncio.run_coroutine_threadsafe(load_pending_employees_from_db(), loop)
-                    db_pending = future.result(timeout=10)
+                    db_pending = future.result(timeout=30)
+                    logger.debug("load_pending_employees_from_db завершен успешно")
                 except RuntimeError:
+                    logger.debug("Event loop не запущен, используем asyncio.run для load_pending_employees_from_db")
                     db_pending = asyncio.run(load_pending_employees_from_db())
                 except Exception as e:
                     logger.warning(f"Ошибка при выполнении load_pending_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
@@ -457,7 +463,7 @@ class EmployeeManager:
                         save_pending_employee_to_db(username, manual_name),
                         loop
                     )
-                    future.result(timeout=10)  # Ждем результат
+                    future.result(timeout=30)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_pending_employee_to_db(username, manual_name))
                 except Exception as e:
@@ -513,7 +519,7 @@ class EmployeeManager:
                         save_pending_employee_to_db(username_lower, manual_name),
                         loop
                     )
-                    future.result(timeout=10)  # Ждем результат
+                    future.result(timeout=30)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_pending_employee_to_db(username_lower, manual_name))
             except Exception as e:
@@ -544,7 +550,7 @@ class EmployeeManager:
                             remove_pending_employee_from_db(username_lower),
                             loop
                         )
-                        future.result(timeout=10)  # Ждем результат
+                        future.result(timeout=30)  # Ждем результат
                     except RuntimeError:
                         asyncio.run(remove_pending_employee_from_db(username_lower))
                 except Exception as e:
@@ -579,7 +585,7 @@ class EmployeeManager:
                                 save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved),
                                 loop
                             )
-                            future.result(timeout=10)  # Ждем результат
+                            future.result(timeout=30)  # Ждем результат
                         except RuntimeError:
                             asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved))
                     except Exception as e:
@@ -619,7 +625,7 @@ class EmployeeManager:
                         save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin),
                         loop
                     )
-                    future.result(timeout=10)  # Ждем результат
+                    future.result(timeout=30)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin))
             except Exception as e:

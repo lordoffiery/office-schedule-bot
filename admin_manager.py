@@ -79,10 +79,13 @@ class AdminManager:
                 # Пытаемся получить текущий event loop
                 try:
                     loop = asyncio.get_running_loop()
+                    logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_admins_from_db")
                     # Loop уже запущен, используем run_coroutine_threadsafe
                     future = asyncio.run_coroutine_threadsafe(load_admins_from_db(), loop)
-                    db_admins = future.result(timeout=10)
+                    db_admins = future.result(timeout=30)
+                    logger.debug("load_admins_from_db завершен успешно")
                 except RuntimeError:
+                    logger.debug("Event loop не запущен, используем asyncio.run для load_admins_from_db")
                     # Loop не запущен, используем asyncio.run
                     db_admins = asyncio.run(load_admins_from_db())
                 except Exception as e:
@@ -185,7 +188,7 @@ class AdminManager:
                 loop = asyncio.get_running_loop()
                 # Если loop запущен, используем run_coroutine_threadsafe
                 future = asyncio.run_coroutine_threadsafe(save_admins_to_db(self.admins), loop)
-                future.result(timeout=10)  # Ждем результат
+                future.result(timeout=30)  # Ждем результат
                 logger.debug(f"Администраторы синхронизированы с PostgreSQL: {len(self.admins)} записей")
             except RuntimeError:
                 # Loop не запущен, используем asyncio.run

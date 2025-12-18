@@ -125,7 +125,7 @@ class ScheduleManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(load_default_schedule_from_db(), loop)
-                    db_schedule = future.result(timeout=10)
+                    db_schedule = future.result(timeout=30)
                 except RuntimeError:
                     db_schedule = asyncio.run(load_default_schedule_from_db())
                 
@@ -263,7 +263,7 @@ class ScheduleManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(save_default_schedule_to_db(schedule), loop)
-                    result = future.result(timeout=10)  # Ждем результат
+                    result = future.result(timeout=30)  # Ждем результат
                     if result:
                         logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
                     else:
@@ -489,7 +489,7 @@ class ScheduleManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
-                    db_schedule = future.result(timeout=10)
+                    db_schedule = future.result(timeout=30)
                 except RuntimeError:
                     db_schedule = asyncio.run(load_schedule_from_db(date_str))
                 
@@ -618,7 +618,7 @@ class ScheduleManager:
                             save_schedule_to_db(date_str, day_name, employees_str),
                             loop
                         )
-                        future.result(timeout=10)  # Ждем результат
+                        future.result(timeout=30)  # Ждем результат
                     except RuntimeError:
                         asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
                 except Exception as e:
@@ -736,7 +736,7 @@ class ScheduleManager:
                         loop
                     )
                     logger.info(f"   Ожидаю результат (timeout=5)...")
-                    result = future.result(timeout=10)  # Ждем результат
+                    result = future.result(timeout=30)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
@@ -839,7 +839,7 @@ class ScheduleManager:
                         loop
                     )
                     logger.info(f"   Ожидаю результат (timeout=5)...")
-                    result = future.result(timeout=10)  # Ждем результат
+                    result = future.result(timeout=30)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
@@ -968,7 +968,7 @@ class ScheduleManager:
                         remove_from_queue_db(date_str, telegram_id),
                         loop
                     )
-                    result = future.result(timeout=10)  # Ждем результат
+                    result = future.result(timeout=30)  # Ждем результат
                     if result:
                         logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
                     else:
@@ -1093,7 +1093,7 @@ class ScheduleManager:
                         loop
                     )
                     logger.info(f"   Ожидаю результат (timeout=5)...")
-                    result = future.result(timeout=10)  # Ждем результат
+                    result = future.result(timeout=30)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
