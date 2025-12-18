@@ -809,27 +809,37 @@ class ScheduleManager:
                 return False  # Уже в очереди
         
         # Сохраняем в PostgreSQL (приоритет 1)
+        logger.info(f"🔄 Начинаю добавление в очередь PostgreSQL: {employee_name} на {date_str}...")
+        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
         if USE_POSTGRESQL and _pool and add_to_queue_db:
             try:
+                logger.info(f"   Выполняю add_to_queue_db({date_str}, {employee_name}, {telegram_id})...")
                 try:
                     loop = asyncio.get_running_loop()
+                    logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
                     future = asyncio.run_coroutine_threadsafe(
                         add_to_queue_db(date_str, employee_name, telegram_id),
                         loop
                     )
+                    logger.info(f"   Ожидаю результат (timeout=5)...")
                     result = future.result(timeout=5)  # Ждем результат
+                    logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
                     else:
                         logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
                 except RuntimeError:
+                    logger.info(f"   Event loop не запущен, использую asyncio.run...")
                     result = asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
+                    logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
                     else:
                         logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка добавления в очередь в PostgreSQL: {e}", exc_info=True)
+        else:
+            logger.warning(f"⚠️ PostgreSQL недоступен для добавления в очередь: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -1049,19 +1059,39 @@ class ScheduleManager:
         days_skip_str = ','.join(days_skipped) if days_skipped else ''
         
         # Сохраняем в PostgreSQL (приоритет 1)
+        logger.info(f"🔄 Начинаю сохранение заявки в PostgreSQL: {employee_name} (неделя {week_str})...")
+        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_request_to_db={save_request_to_db is not None}")
         if USE_POSTGRESQL and _pool and save_request_to_db:
             try:
+                logger.info(f"   Выполняю save_request_to_db(неделя={week_str}, сотрудник={employee_name}, ID={telegram_id})...")
                 try:
                     loop = asyncio.get_running_loop()
+                    logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
                     future = asyncio.run_coroutine_threadsafe(
                         save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    logger.info(f"   Ожидаю результат (timeout=5)...")
+                    result = future.result(timeout=5)  # Ждем результат
+                    logger.info(f"   Получен результат: {result}")
+                    if result:
+                        logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
+                    else:
+                        logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
                 except RuntimeError:
-                    asyncio.run(save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped))
+                    logger.info(f"   Event loop не запущен, использую asyncio.run...")
+                    result = asyncio.run(save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped))
+                    logger.info(f"   Получен результат: {result}")
+                    if result:
+                        logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
+                    else:
+                        logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
+                logger.error(f"❌ Критическая ошибка при сохранении заявки в PostgreSQL: {e}", exc_info=True)
+        else:
+            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения заявки: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_request_to_db={save_request_to_db is not None}")
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
