@@ -284,7 +284,9 @@ async def cmd_help(message: Message):
             "   Пример: /admin_set_default_schedule Понедельник Вася, Дима Ч, Айлар, Егор, Илья, Даша, Виталий, Тимур\n"
             "   Дни: Понедельник, Вторник, Среда, Четверг, Пятница\n\n"
             "/admin_refresh_schedules - Обновить имена сотрудников в расписаниях (синхронизация с employees)\n"
-            "   Используйте после ручного добавления сотрудников в Google Sheets"
+            "   Используйте после ручного добавления сотрудников в Google Sheets\n\n"
+            "/admin_sync_from_sheets - Синхронизировать данные из Google Sheets в PostgreSQL\n"
+            "   Используйте после ручного изменения данных в Google Sheets"
         )
     
     await message.reply(help_text)
@@ -1528,6 +1530,92 @@ async def cmd_admin_skip_day(message: Message):
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", message_text)
 
 
+@dp.message(Command("admin_sync_from_sheets"))
+async def cmd_admin_sync_from_sheets(message: Message):
+    """Синхронизировать данные из Google Sheets в PostgreSQL (только для админов)"""
+    user_id = message.from_user.id
+    user_info = get_user_info(message)
+    
+    if not admin_manager.is_admin(user_id):
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+        return
+    
+    response = "🔄 Начинаю синхронизацию данных из Google Sheets в PostgreSQL..."
+    await message.reply(response)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+    
+    try:
+        from config import USE_GOOGLE_SHEETS
+        if not USE_GOOGLE_SHEETS:
+            response = "❌ Google Sheets отключен"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+            return
+        
+        # Импортируем функции синхронизации из check_and_sync_data.py
+        from check_and_sync_data import (
+            compare_and_sync_admins, compare_and_sync_employees, compare_and_sync_pending_employees,
+            compare_and_sync_default_schedule, compare_and_sync_schedules, compare_and_sync_requests,
+            compare_and_sync_queue
+        )
+        from google_sheets_manager import GoogleSheetsManager
+        
+        sheets_manager = GoogleSheetsManager()
+        if not sheets_manager.is_available():
+            response = "❌ Google Sheets недоступен"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+            return
+        
+        # Проверяем PostgreSQL
+        from database_sync import _get_connection
+        conn = _get_connection()
+        if not conn:
+            response = "❌ PostgreSQL недоступен"
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+            return
+        conn.close()
+        
+        # Выполняем синхронизацию
+        changes = False
+        changes |= compare_and_sync_admins(sheets_manager)
+        changes |= compare_and_sync_employees(sheets_manager)
+        changes |= compare_and_sync_pending_employees(sheets_manager)
+        changes |= compare_and_sync_default_schedule(sheets_manager)
+        changes |= compare_and_sync_schedules(sheets_manager)
+        changes |= compare_and_sync_requests(sheets_manager)
+        changes |= compare_and_sync_queue(sheets_manager)
+        
+        if changes:
+            # Перезагружаем данные в менеджерах
+            employee_manager.reload_employees()
+            employee_manager.reload_pending_employees()
+            admin_manager.reload_admins()
+            schedule_manager.load_default_schedule()
+            
+            response = (
+                "✅ Синхронизация завершена!\n\n"
+                "Данные из Google Sheets успешно скопированы в PostgreSQL.\n"
+                "Все менеджеры обновлены."
+            )
+        else:
+            response = (
+                "✅ Синхронизация завершена!\n\n"
+                "Все данные идентичны. Изменений не требуется."
+            )
+        
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+    except Exception as e:
+        response = f"❌ Ошибка при синхронизации: {e}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_from_sheets", response)
+        logger.error(f"Ошибка синхронизации из Google Sheets: {e}", exc_info=True)
+
+
 @dp.message(Command("admin_add_day"))
 async def cmd_admin_add_day(message: Message):
     """Добавить день для сотрудника (только для админов, можно указать несколько дат)"""
@@ -1825,8 +1913,8 @@ async def main():
         if not USE_GOOGLE_SHEETS:
             return
         
-        # Ждем 5 минут после старта бота перед первой синхронизацией
-        await asyncio.sleep(300)  # 5 минут
+        # Ждем 20 секунд после старта бота перед первой синхронизацией
+        await asyncio.sleep(20)  # 20 секунд
         
         while True:
             try:
@@ -1848,13 +1936,13 @@ async def main():
             except Exception as e:
                 logger.error(f"❌ Ошибка при синхронизации PostgreSQL -> Google Sheets: {e}", exc_info=True)
             
-            # Ждем 1 час до следующей синхронизации
-            await asyncio.sleep(3600)  # 1 час
+            # Ждем 20 секунд до следующей синхронизации
+            await asyncio.sleep(20)  # 20 секунд
     
     # Запускаем задачу синхронизации только если PostgreSQL используется
     if use_postgresql:
         asyncio.create_task(sync_postgresql_to_sheets_periodically())
-        logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждый час)")
+        logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждые 20 секунд)")
     
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
     health_thread = threading.Thread(target=start_health_server, daemon=True)
