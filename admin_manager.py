@@ -23,19 +23,28 @@ else:
 # Импортируем функции для работы с PostgreSQL
 if USE_POSTGRESQL:
     try:
-        from database import load_admins_from_db, save_admins_to_db, add_admin_to_db, remove_admin_from_db, _pool
+        from database import load_admins_from_db, save_admins_to_db, add_admin_to_db, remove_admin_from_db
     except ImportError:
         load_admins_from_db = None
         save_admins_to_db = None
         add_admin_to_db = None
         remove_admin_from_db = None
-        _pool = None
 else:
     load_admins_from_db = None
     save_admins_to_db = None
     add_admin_to_db = None
     remove_admin_from_db = None
-    _pool = None
+
+
+def _get_pool():
+    """Получить пул подключений PostgreSQL (динамический импорт)"""
+    if not USE_POSTGRESQL:
+        return None
+    try:
+        from database import _pool
+        return _pool
+    except ImportError:
+        return None
 
 
 class AdminManager:
@@ -64,7 +73,8 @@ class AdminManager:
         self.admins = set()
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен и loop запущен)
-        if USE_POSTGRESQL and _pool and load_admins_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_admins_from_db:
             try:
                 # Пытаемся получить текущий event loop
                 try:
@@ -150,7 +160,8 @@ class AdminManager:
         
         # Синхронизируем с PostgreSQL (если загрузились из файла/Google Sheets, но не из PostgreSQL)
         # Это нужно для первичной синхронизации данных
-        if USE_POSTGRESQL and _pool:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool:
             self._sync_to_postgresql()
     
     def _save_admins_to_file_only(self):
@@ -162,7 +173,8 @@ class AdminManager:
     
     def _sync_to_postgresql(self):
         """Синхронизировать администраторов с PostgreSQL"""
-        if not USE_POSTGRESQL or not _pool or not save_admins_to_db:
+        pool = _get_pool()
+        if not USE_POSTGRESQL or not pool or not save_admins_to_db:
             return
         
         try:
@@ -208,7 +220,8 @@ class AdminManager:
         self.admins.add(telegram_id)
         
         # Сохраняем в PostgreSQL
-        if USE_POSTGRESQL and _pool and add_admin_to_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and add_admin_to_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -221,7 +234,8 @@ class AdminManager:
             except Exception as e:
                 logger.warning(f"Ошибка добавления администратора {telegram_id} в PostgreSQL: {e}", exc_info=True)
         else:
-            logger.debug(f"PostgreSQL недоступен для добавления админа {telegram_id} (USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, add_admin_to_db={add_admin_to_db is not None})")
+            pool = _get_pool()
+            logger.debug(f"PostgreSQL недоступен для добавления админа {telegram_id} (USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_admin_to_db={add_admin_to_db is not None})")
         
         # Сохраняем в Google Sheets и файл
         self._save_admins()
@@ -234,7 +248,8 @@ class AdminManager:
         self.admins.remove(telegram_id)
         
         # Удаляем из PostgreSQL
-        if USE_POSTGRESQL and _pool and remove_admin_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and remove_admin_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()

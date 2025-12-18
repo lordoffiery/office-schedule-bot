@@ -29,7 +29,7 @@ if USE_POSTGRESQL:
         from database import (
             load_employees_from_db, save_employee_to_db,
             load_pending_employees_from_db, save_pending_employee_to_db,
-            remove_pending_employee_from_db, _pool
+            remove_pending_employee_from_db
         )
     except ImportError:
         load_employees_from_db = None
@@ -37,14 +37,23 @@ if USE_POSTGRESQL:
         load_pending_employees_from_db = None
         save_pending_employee_to_db = None
         remove_pending_employee_from_db = None
-        _pool = None
 else:
     load_employees_from_db = None
     save_employee_to_db = None
     load_pending_employees_from_db = None
     save_pending_employee_to_db = None
     remove_pending_employee_from_db = None
-    _pool = None
+
+
+def _get_pool():
+    """Получить пул подключений PostgreSQL (динамический импорт)"""
+    if not USE_POSTGRESQL:
+        return None
+    try:
+        from database import _pool
+        return _pool
+    except ImportError:
+        return None
 
 
 class EmployeeManager:
@@ -79,7 +88,8 @@ class EmployeeManager:
         self.approved_by_admin = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_employees_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_employees_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -226,7 +236,8 @@ class EmployeeManager:
     
     def _sync_employees_to_postgresql(self):
         """Синхронизировать сотрудников с PostgreSQL"""
-        if not USE_POSTGRESQL or not _pool or not save_employee_to_db:
+        pool = _get_pool()
+        if not USE_POSTGRESQL or not pool or not save_employee_to_db:
             return
         
         for telegram_id, (manual_name, telegram_name, username) in self.employees.items():
@@ -297,7 +308,8 @@ class EmployeeManager:
         self.approved_by_admin[telegram_id] = True
         
         # Сохраняем в PostgreSQL
-        if USE_POSTGRESQL and _pool and save_employee_to_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and save_employee_to_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -347,7 +359,8 @@ class EmployeeManager:
         self.pending_employees = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        if USE_POSTGRESQL and _pool and load_pending_employees_from_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and load_pending_employees_from_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
@@ -426,7 +439,8 @@ class EmployeeManager:
     
     def _sync_pending_employees_to_postgresql(self):
         """Синхронизировать отложенных сотрудников с PostgreSQL"""
-        if not USE_POSTGRESQL or not _pool or not save_pending_employee_to_db:
+        pool = _get_pool()
+        if not USE_POSTGRESQL or not pool or not save_pending_employee_to_db:
             return
         
         for username, manual_name in self.pending_employees.items():
@@ -512,7 +526,8 @@ class EmployeeManager:
             del self.pending_employees[username_lower]
             
             # Удаляем из PostgreSQL
-            if USE_POSTGRESQL and _pool and remove_pending_employee_from_db:
+            pool = _get_pool()
+            if USE_POSTGRESQL and pool and remove_pending_employee_from_db:
                 try:
                     try:
                         loop = asyncio.get_running_loop()
@@ -545,7 +560,8 @@ class EmployeeManager:
                 self.employees[telegram_id] = (manual_name, telegram_name, username or old_username)
                 
                 # Сохраняем в PostgreSQL
-                if USE_POSTGRESQL and _pool and save_employee_to_db:
+                pool = _get_pool()
+        if USE_POSTGRESQL and pool and save_employee_to_db:
                     approved = self.approved_by_admin.get(telegram_id, True)
                     try:
                         try:
@@ -585,7 +601,8 @@ class EmployeeManager:
         self.approved_by_admin[telegram_id] = was_added_by_admin
         
         # Сохраняем в PostgreSQL
-        if USE_POSTGRESQL and _pool and save_employee_to_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and save_employee_to_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()

@@ -27,13 +27,22 @@ if USE_GOOGLE_SHEETS:
 # Импортируем функции для работы с PostgreSQL
 if USE_POSTGRESQL:
     try:
-        from database import save_log_to_db, _pool
+        from database import save_log_to_db
     except ImportError:
         save_log_to_db = None
-        _pool = None
 else:
     save_log_to_db = None
-    _pool = None
+
+
+def _get_pool():
+    """Получить пул подключений PostgreSQL (динамический импорт)"""
+    if not USE_POSTGRESQL:
+        return None
+    try:
+        from database import _pool
+        return _pool
+    except ImportError:
+        return None
 
 # Создаем logger (без файлового handler, чтобы не занимать место)
 logger = logging.getLogger('bot_logger')
@@ -86,7 +95,8 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
     ]
     
     # Сохраняем в PostgreSQL (приоритет 1)
-    if USE_POSTGRESQL and _pool and save_log_to_db:
+    pool = _get_pool()
+    if USE_POSTGRESQL and pool and save_log_to_db:
         try:
             try:
                 loop = asyncio.get_running_loop()
@@ -157,7 +167,8 @@ async def flush_log_buffer():
                 target, row = log_entry
                 
                 success = False
-                if target == 'postgresql' and USE_POSTGRESQL and _pool and save_log_to_db:
+                pool = _get_pool()
+                if target == 'postgresql' and USE_POSTGRESQL and pool and save_log_to_db:
                     try:
                         # Парсим row для PostgreSQL
                         user_id = int(row[1]) if len(row) > 1 else 0
