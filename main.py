@@ -1709,11 +1709,30 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Принудительный вывод для диагностики (виден в логах контейнера)
+    print("=" * 50)
+    print("🚀 Запуск бота...")
+    print("=" * 50)
+    
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%Y-%m-%d %H:%M:%S',
+        force=True  # Принудительная настройка логирования
     )
-    logger.info("Бот запущен...")
-    asyncio.run(main())
+    
+    # Дополнительный вывод в stdout для диагностики
+    import sys
+    sys.stdout.flush()
+    
+    logger.info("=" * 50)
+    logger.info("🚀 Бот запущен...")
+    logger.info("=" * 50)
+    
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}", exc_info=True)
+        print(f"❌ Критическая ошибка: {e}")
+        raise
 
