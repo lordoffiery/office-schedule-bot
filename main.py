@@ -108,6 +108,55 @@ def day_to_short(day: str) -> str:
     return day_map.get(day, day[:2])
 
 
+# Глобальные переменные для синхронизации
+_sync_lock = None
+_last_sync_time = 0
+
+# Функция синхронизации PostgreSQL -> Google Sheets
+async def sync_postgresql_to_sheets():
+    """Синхронизация данных из PostgreSQL в Google Sheets (неблокирующая)"""
+    global _last_sync_time, _sync_lock
+    
+    if _sync_lock is None:
+        return  # Бот еще не инициализирован
+    
+    from config import USE_GOOGLE_SHEETS
+    if not USE_GOOGLE_SHEETS:
+        return
+    
+    # Проверяем, не синхронизировали ли мы недавно (защита от частых вызовов)
+    current_time = asyncio.get_event_loop().time()
+    if current_time - _last_sync_time < 5:  # Минимум 5 секунд между синхронизациями
+        return
+    
+    async with _sync_lock:
+        # Двойная проверка после получения блокировки
+        current_time = asyncio.get_event_loop().time()
+        if current_time - _last_sync_time < 5:
+            return
+        
+        try:
+            # Запускаем синхронизацию в фоне (не блокируем выполнение команд)
+            asyncio.create_task(_run_sync_in_background())
+            _last_sync_time = current_time
+        except Exception as e:
+            logger.error(f"❌ Ошибка при запуске синхронизации: {e}", exc_info=True)
+
+async def _run_sync_in_background():
+    """Запустить синхронизацию в фоновом режиме"""
+    try:
+        import subprocess
+        import sys
+        # Запускаем скрипт синхронизации в отдельном процессе (не блокируем)
+        subprocess.Popen(
+            [sys.executable, 'sync_postgresql_to_sheets.py'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        logger.debug("🔄 Запущена фоновая синхронизация PostgreSQL -> Google Sheets")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при запуске фоновой синхронизации: {e}", exc_info=True)
+
 # Middleware для автоматической синхронизации после каждой команды
 class SyncMiddleware(BaseMiddleware):
     async def __call__(
@@ -1929,6 +1978,7 @@ async def main():
     # Инициализируем глобальные переменные для синхронизации
     global _sync_lock
     _sync_lock = asyncio.Lock()
+    logger.info("Инициализирован lock для синхронизации")
     
     # Запускаем задачу для периодической синхронизации PostgreSQL -> Google Sheets (каждые 10 минут)
     async def sync_postgresql_to_sheets_periodically():
