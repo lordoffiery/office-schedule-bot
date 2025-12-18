@@ -496,7 +496,8 @@ class EmployeeManager:
         self.pending_employees[username_lower] = manual_name
         
         # Сохраняем в PostgreSQL
-        if USE_POSTGRESQL and _pool and save_pending_employee_to_db:
+        pool = _get_pool()
+        if USE_POSTGRESQL and pool and save_pending_employee_to_db:
             try:
                 try:
                     loop = asyncio.get_running_loop()
