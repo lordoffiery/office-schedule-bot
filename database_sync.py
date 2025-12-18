@@ -208,3 +208,81 @@ def load_queue_from_db_sync(date_str: str) -> List[Dict]:
     finally:
         conn.close()
 
+
+def save_schedule_to_db_sync(date_str: str, day_name: str, employees_str: str) -> bool:
+    """Синхронное сохранение расписания на дату в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        schedule_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO schedules (date, day_name, employees)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (date) DO UPDATE SET
+                    day_name = EXCLUDED.day_name,
+                    employees = EXCLUDED.employees,
+                    updated_at = NOW()
+            """, (schedule_date, day_name, employees_str))
+            conn.commit()
+            logger.debug(f"✅ Расписание {date_str} ({day_name}) успешно сохранено в PostgreSQL (sync)")
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения расписания в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def remove_from_queue_db_sync(date_str: str, telegram_id: int) -> bool:
+    """Синхронное удаление из очереди на дату в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        queue_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM queue WHERE date = %s AND telegram_id = %s", (queue_date, telegram_id))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления из очереди в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def add_to_queue_db_sync(date_str: str, employee_name: str, telegram_id: int) -> bool:
+    """Синхронное добавление в очередь на дату в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        queue_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO queue (date, employee_name, telegram_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (date, telegram_id) DO NOTHING
+            """, (queue_date, employee_name, telegram_id))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления в очередь в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+

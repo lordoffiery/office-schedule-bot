@@ -772,30 +772,44 @@ class ScheduleManager:
         if USE_POSTGRESQL and pool and save_schedule_to_db:
             try:
                 logger.info(f"   Выполняю save_schedule_to_db({date_str}, {day_name}, {len(employees_str)} символов)...")
+                # Используем синхронную функцию для записи
                 try:
-                    loop = asyncio.get_running_loop()
-                    logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_schedule_to_db(date_str, day_name, employees_str),
-                        loop
-                    )
-                    logger.info(f"   Ожидаю результат (timeout=30)...")
-                    result = future.result(timeout=30)  # Ждем результат
+                    from database_sync import save_schedule_to_db_sync
+                    logger.info(f"   Используем синхронное сохранение расписания в PostgreSQL...")
+                    result = save_schedule_to_db_sync(date_str, day_name, employees_str)
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
                     else:
                         logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
-                except RuntimeError:
-                    logger.info(f"   Event loop не запущен, использую asyncio.run...")
-                    result = asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
-                    logger.info(f"   Получен результат: {result}")
-                    if result:
-                        logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
-                    else:
-                        logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
+                except ImportError:
+                    # Fallback на асинхронную запись
+                    try:
+                        loop = asyncio.get_running_loop()
+                        logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
+                        future = asyncio.run_coroutine_threadsafe(
+                            save_schedule_to_db(date_str, day_name, employees_str),
+                            loop
+                        )
+                        logger.info(f"   Ожидаю результат (timeout=30)...")
+                        result = future.result(timeout=30)  # Ждем результат
+                        logger.info(f"   Получен результат: {result}")
+                        if result:
+                            logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
+                        else:
+                            logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
+                    except RuntimeError:
+                        logger.info(f"   Event loop не запущен, использую asyncio.run...")
+                        result = asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
+                        logger.info(f"   Получен результат: {result}")
+                        if result:
+                            logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
+                        else:
+                            logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
+                    except Exception as e:
+                        logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
                 except Exception as e:
-                    logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+                    logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL (sync): {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка при сохранении расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         else:
@@ -874,29 +888,40 @@ class ScheduleManager:
         logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
         if USE_POSTGRESQL and pool and add_to_queue_db:
             try:
-                logger.info(f"   Выполняю add_to_queue_db({date_str}, {employee_name}, {telegram_id})...")
+                # Используем синхронную функцию для добавления
                 try:
-                    loop = asyncio.get_running_loop()
-                    logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
-                    future = asyncio.run_coroutine_threadsafe(
-                        add_to_queue_db(date_str, employee_name, telegram_id),
-                        loop
-                    )
-                    logger.info(f"   Ожидаю результат (timeout=30)...")
-                    result = future.result(timeout=30)  # Ждем результат
+                    from database_sync import add_to_queue_db_sync
+                    logger.info(f"   Используем синхронное добавление в очередь PostgreSQL...")
+                    result = add_to_queue_db_sync(date_str, employee_name, telegram_id)
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
                     else:
                         logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
-                except RuntimeError:
-                    logger.info(f"   Event loop не запущен, использую asyncio.run...")
-                    result = asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
-                    logger.info(f"   Получен результат: {result}")
-                    if result:
-                        logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
-                    else:
-                        logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
+                except ImportError:
+                    # Fallback на асинхронную операцию
+                    try:
+                        loop = asyncio.get_running_loop()
+                        logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
+                        future = asyncio.run_coroutine_threadsafe(
+                            add_to_queue_db(date_str, employee_name, telegram_id),
+                            loop
+                        )
+                        logger.info(f"   Ожидаю результат (timeout=30)...")
+                        result = future.result(timeout=30)  # Ждем результат
+                        logger.info(f"   Получен результат: {result}")
+                        if result:
+                            logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
+                        else:
+                            logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
+                    except RuntimeError:
+                        logger.info(f"   Event loop не запущен, использую asyncio.run...")
+                        result = asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
+                        logger.info(f"   Получен результат: {result}")
+                        if result:
+                            logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
+                        else:
+                            logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка добавления в очередь в PostgreSQL: {e}", exc_info=True)
         else:
@@ -1022,23 +1047,33 @@ class ScheduleManager:
         pool = _get_pool()
         if USE_POSTGRESQL and pool and remove_from_queue_db:
             try:
+                # Используем синхронную функцию для удаления
                 try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        remove_from_queue_db(date_str, telegram_id),
-                        loop
-                    )
-                    result = future.result(timeout=30)  # Ждем результат
+                    from database_sync import remove_from_queue_db_sync
+                    result = remove_from_queue_db_sync(date_str, telegram_id)
                     if result:
                         logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
                     else:
                         logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
-                except RuntimeError:
-                    result = asyncio.run(remove_from_queue_db(date_str, telegram_id))
-                    if result:
-                        logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
-                    else:
-                        logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
+                except ImportError:
+                    # Fallback на асинхронную операцию
+                    try:
+                        loop = asyncio.get_running_loop()
+                        future = asyncio.run_coroutine_threadsafe(
+                            remove_from_queue_db(date_str, telegram_id),
+                            loop
+                        )
+                        result = future.result(timeout=30)  # Ждем результат
+                        if result:
+                            logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
+                        else:
+                            logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
+                    except RuntimeError:
+                        result = asyncio.run(remove_from_queue_db(date_str, telegram_id))
+                        if result:
+                            logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
+                        else:
+                            logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка удаления из очереди в PostgreSQL: {e}", exc_info=True)
         
