@@ -1421,60 +1421,109 @@ class ScheduleManager:
             self.save_default_schedule(schedule)
     
     def update_employee_name_in_schedules(self, old_name: str, new_formatted_name: str):
-        """Обновить имя сотрудника во всех расписаниях в Google Sheets (вкладка schedules)"""
-                # if not USE_GOOGLE_SHEETS_FOR_WRITES or not self.sheets_manager or not self.sheets_manager.is_available():
-        #     return
-        return  # Отключено для ускорения работы бота
+        """Обновить имя сотрудника во всех расписаниях в PostgreSQL и Google Sheets"""
+        from config import USE_POSTGRESQL
+        from datetime import datetime, timedelta
         
-        try:
-            rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
-            rows = filter_empty_rows(rows)
-            start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
-            
-            updated = False
-            rows_to_save = []
-            
-            # Сохраняем заголовок, если есть
-            if has_header:
-                rows_to_save.append(rows[0])
-            else:
-                rows_to_save.append(['date', 'day_name', 'employees'])
-            
-            # Обрабатываем все строки
-            for row in rows[start_idx:]:
-                if len(row) >= 3 and row[2]:  # Проверяем, что есть список сотрудников
-                    employees_str = row[2].strip()
-                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+        updated_count = 0
+        
+        # Обновляем в PostgreSQL
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import load_schedule_from_db_sync, save_schedule_to_db_sync
+                
+                # Проверяем последние 60 дней
+                today = datetime.now().date()
+                for i in range(60):
+                    date = today + timedelta(days=i - 30)  # От -30 до +30 дней
+                    date_str = date.strftime('%Y-%m-%d')
                     
-                    # Проверяем, есть ли старое имя в списке
-                    updated_row = False
-                    new_employees = []
-                    for emp in employees:
-                        # Извлекаем простое имя из отформатированного (если есть)
-                        plain_name = self.get_plain_name_from_formatted(emp)
-                        if plain_name == old_name:
-                            # Заменяем на новое форматированное имя
-                            new_employees.append(new_formatted_name)
-                            updated_row = True
-                            updated = True
-                        else:
-                            new_employees.append(emp)
-                    
-                    if updated_row:
-                        # Обновляем строку с новым списком сотрудников
-                        new_row = row.copy()
-                        new_row[2] = ', '.join(new_employees)
-                        rows_to_save.append(new_row)
-                    else:
-                        # Оставляем строку без изменений
-                        rows_to_save.append(row)
+                    db_schedule = load_schedule_from_db_sync(date_str)
+                    if db_schedule:
+                        for day_name, employees_str in db_schedule.items():
+                            if employees_str:
+                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                updated_employees = []
+                                row_updated = False
+                                
+                                for emp in employees:
+                                    # Извлекаем простое имя из отформатированного (если есть)
+                                    plain_name = self.get_plain_name_from_formatted(emp)
+                                    if plain_name == old_name:
+                                        # Заменяем на новое форматированное имя
+                                        updated_employees.append(new_formatted_name)
+                                        row_updated = True
+                                    else:
+                                        updated_employees.append(emp)
+                                
+                                if row_updated:
+                                    new_employees_str = ', '.join(updated_employees)
+                                    if save_schedule_to_db_sync(date_str, day_name, new_employees_str):
+                                        updated_count += 1
+                                        logger.debug(f"Обновлено имя '{old_name}' → '{new_formatted_name}' в расписании {date_str} ({day_name}) в PostgreSQL")
+            except Exception as e:
+                logger.error(f"Ошибка обновления имени сотрудника в расписаниях PostgreSQL: {e}", exc_info=True)
+        
+        # Обновляем в Google Sheets (только если включено)
+        from config import USE_GOOGLE_SHEETS_FOR_WRITES
+        if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                from utils import filter_empty_rows, get_header_start_idx
+                from config import SHEET_SCHEDULES
+                
+                rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                rows = filter_empty_rows(rows)
+                start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+                
+                updated = False
+                rows_to_save = []
+                
+                # Сохраняем заголовок, если есть
+                if has_header:
+                    rows_to_save.append(rows[0])
                 else:
-                    # Оставляем строку без изменений (некорректный формат)
-                    rows_to_save.append(row)
-            #     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
-            #     logger.info(f"Обновлено имя сотрудника '{old_name}' → '{new_formatted_name}' во всех расписаниях в Google Sheets")
-        except Exception as e:
-            logger.error(f"Ошибка обновления имени сотрудника в расписаниях: {e}")
+                    rows_to_save.append(['date', 'day_name', 'employees'])
+                
+                # Обрабатываем все строки
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[2]:  # Проверяем, что есть список сотрудников
+                        employees_str = row[2].strip()
+                        employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                        
+                        # Проверяем, есть ли старое имя в списке
+                        updated_row = False
+                        new_employees = []
+                        for emp in employees:
+                            # Извлекаем простое имя из отформатированного (если есть)
+                            plain_name = self.get_plain_name_from_formatted(emp)
+                            if plain_name == old_name:
+                                # Заменяем на новое форматированное имя
+                                new_employees.append(new_formatted_name)
+                                updated_row = True
+                                updated = True
+                            else:
+                                new_employees.append(emp)
+                        
+                        if updated_row:
+                            # Обновляем строку с новым списком сотрудников
+                            new_row = row.copy()
+                            new_row[2] = ', '.join(new_employees)
+                            rows_to_save.append(new_row)
+                        else:
+                            # Оставляем строку без изменений
+                            rows_to_save.append(row)
+                    else:
+                        # Оставляем строку без изменений (некорректный формат)
+                        rows_to_save.append(row)
+                
+                if updated:
+                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
+                    logger.info(f"Обновлено имя сотрудника '{old_name}' → '{new_formatted_name}' во всех расписаниях в Google Sheets")
+            except Exception as e:
+                logger.error(f"Ошибка обновления имени сотрудника в расписаниях Google Sheets: {e}", exc_info=True)
+        
+        if updated_count > 0:
+            logger.info(f"✅ Обновлено {updated_count} расписаний в PostgreSQL для сотрудника '{old_name}' → '{new_formatted_name}'")
     
     def _update_all_employee_names_in_default_schedule(self):
         """Обновить все имена сотрудников в default_schedule.txt при старте бота"""
