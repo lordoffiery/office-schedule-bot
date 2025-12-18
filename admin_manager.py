@@ -80,30 +80,8 @@ class AdminManager:
                 logger.debug("Используем синхронную загрузку администраторов из PostgreSQL")
                 db_admins = load_admins_from_db_sync()
                 logger.debug("load_admins_from_db_sync завершен успешно")
-            except ImportError:
-                # Fallback на асинхронную загрузку
-                pool = _get_pool()
-                if pool and load_admins_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_admins_from_db")
-                            future = asyncio.run_coroutine_threadsafe(load_admins_from_db(), loop)
-                            db_admins = future.result(timeout=30)
-                            logger.debug("load_admins_from_db завершен успешно")
-                        except RuntimeError:
-                            logger.debug("Event loop не запущен, используем asyncio.run для load_admins_from_db")
-                            db_admins = asyncio.run(load_admins_from_db())
-                        except Exception as e:
-                            logger.warning(f"Ошибка при выполнении load_admins_from_db: {type(e).__name__}: {e}", exc_info=True)
-                            db_admins = None
-                    except Exception as e:
-                        logger.warning(f"Ошибка загрузки администраторов из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
-                        db_admins = None
-                else:
-                    db_admins = None
             except Exception as e:
-                logger.warning(f"Ошибка загрузки администраторов из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки администраторов из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
                 db_admins = None
             
             if db_admins:
@@ -191,23 +169,13 @@ class AdminManager:
     
     def _sync_to_postgresql(self):
         """Синхронизировать администраторов с PostgreSQL"""
-        pool = _get_pool()
-        if not USE_POSTGRESQL or not pool or not save_admins_to_db:
+        if not USE_POSTGRESQL:
             return
         
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                # Если loop запущен, используем run_coroutine_threadsafe
-                future = asyncio.run_coroutine_threadsafe(save_admins_to_db(self.admins), loop)
-                future.result(timeout=30)  # Ждем результат
-                logger.debug(f"Администраторы синхронизированы с PostgreSQL: {len(self.admins)} записей")
-            except RuntimeError:
-                # Loop не запущен, используем asyncio.run
-                asyncio.run(save_admins_to_db(self.admins))
-                logger.debug(f"Администраторы синхронизированы с PostgreSQL: {len(self.admins)} записей")
-            except Exception as e:
-                logger.warning(f"Ошибка при выполнении save_admins_to_db: {type(e).__name__}: {e}", exc_info=True)
+            from database_sync import save_admins_to_db_sync
+            save_admins_to_db_sync(self.admins)
+            logger.debug(f"Администраторы синхронизированы с PostgreSQL: {len(self.admins)} записей")
         except Exception as e:
             logger.warning(f"Ошибка синхронизации с PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
     
@@ -240,22 +208,13 @@ class AdminManager:
         self.admins.add(telegram_id)
         
         # Сохраняем в PostgreSQL
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and add_admin_to_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(add_admin_to_db(telegram_id), loop)
-                    result = future.result(timeout=5)  # Ждем результат
-                    logger.debug(f"Админ {telegram_id} добавлен в PostgreSQL: {result}")
-                except RuntimeError:
-                    result = asyncio.run(add_admin_to_db(telegram_id))
-                    logger.debug(f"Админ {telegram_id} добавлен в PostgreSQL: {result}")
+                from database_sync import add_admin_to_db_sync
+                result = add_admin_to_db_sync(telegram_id)
+                logger.debug(f"Админ {telegram_id} добавлен в PostgreSQL: {result}")
             except Exception as e:
                 logger.warning(f"Ошибка добавления администратора {telegram_id} в PostgreSQL: {e}", exc_info=True)
-        else:
-            pool = _get_pool()
-            logger.debug(f"PostgreSQL недоступен для добавления админа {telegram_id} (USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_admin_to_db={add_admin_to_db is not None})")
         
         # Сохраняем в Google Sheets и файл
         self._save_admins()
@@ -268,17 +227,12 @@ class AdminManager:
         self.admins.remove(telegram_id)
         
         # Удаляем из PostgreSQL
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and remove_admin_from_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(remove_admin_from_db(telegram_id), loop)
-                    future.result(timeout=5)  # Ждем результат
-                except RuntimeError:
-                    asyncio.run(remove_admin_from_db(telegram_id))
+                from database_sync import remove_admin_from_db_sync
+                remove_admin_from_db_sync(telegram_id)
             except Exception as e:
-                logger.warning(f"Ошибка удаления администратора из PostgreSQL: {e}")
+                logger.warning(f"Ошибка удаления администратора из PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets и файл
         self._save_admins()

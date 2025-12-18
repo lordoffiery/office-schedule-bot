@@ -95,17 +95,10 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
     ]
     
     # Сохраняем в PostgreSQL (приоритет 1)
-    pool = _get_pool()
-    if USE_POSTGRESQL and pool and save_log_to_db:
+    if USE_POSTGRESQL:
         try:
-            try:
-                loop = asyncio.get_running_loop()
-                asyncio.run_coroutine_threadsafe(
-                    save_log_to_db(user_id, username or '', first_name, command, response_short),
-                    loop
-                )
-            except RuntimeError:
-                asyncio.run(save_log_to_db(user_id, username or '', first_name, command, response_short))
+            from database_sync import save_log_to_db_sync
+            save_log_to_db_sync(user_id, username or '', first_name, command, response_short)
         except Exception as e:
             logger.warning(f"Ошибка записи лога в PostgreSQL: {e}")
             # Добавляем в буфер для повторной попытки

@@ -131,26 +131,8 @@ class ScheduleManager:
                     schedule = db_schedule
                     logger.info(f"Расписание по умолчанию загружено из PostgreSQL: {len(schedule)} дней")
                     return schedule
-            except ImportError:
-                # Fallback на асинхронную загрузку
-                pool = _get_pool()
-                if pool and load_default_schedule_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            future = asyncio.run_coroutine_threadsafe(load_default_schedule_from_db(), loop)
-                            db_schedule = future.result(timeout=30)
-                        except RuntimeError:
-                            db_schedule = asyncio.run(load_default_schedule_from_db())
-                        
-                        if db_schedule:
-                            schedule = db_schedule
-                            logger.info(f"Расписание по умолчанию загружено из PostgreSQL: {len(schedule)} дней")
-                            return schedule
-                    except Exception as e:
-                        logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -273,23 +255,14 @@ class ScheduleManager:
             schedule: Dict[str, Dict[str, str]] - расписание по дням, где внутренний словарь - места (ключ: "подразделение.место")
         """
         # Сохраняем в PostgreSQL (приоритет 1)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and save_default_schedule_to_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(save_default_schedule_to_db(schedule), loop)
-                    result = future.result(timeout=30)  # Ждем результат
-                    if result:
-                        logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
-                    else:
-                        logger.warning("⚠️ Расписание по умолчанию не сохранено в PostgreSQL (вернуло False)")
-                except RuntimeError:
-                    result = asyncio.run(save_default_schedule_to_db(schedule))
-                    if result:
-                        logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
-                    else:
-                        logger.warning("⚠️ Расписание по умолчанию не сохранено в PostgreSQL (вернуло False)")
+                from database_sync import save_default_schedule_to_db_sync
+                result = save_default_schedule_to_db_sync(schedule)
+                if result:
+                    logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
+                else:
+                    logger.warning("⚠️ Расписание по умолчанию не сохранено в PostgreSQL (вернуло False)")
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}", exc_info=True)
         
@@ -450,29 +423,8 @@ class ScheduleManager:
                     if db_schedule:
                         logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
                         return True
-            except ImportError:
-                # Fallback на асинхронную проверку
-                pool = _get_pool()
-                if pool and load_schedule_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            for date_str in week_dates_str:
-                                future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
-                                db_schedule = future.result(timeout=10)
-                                if db_schedule:
-                                    logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
-                                    return True
-                        except RuntimeError:
-                            for date_str in week_dates_str:
-                                db_schedule = asyncio.run(load_schedule_from_db(date_str))
-                                if db_schedule:
-                                    logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
-                                    return True
-                    except Exception as e:
-                        logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Ошибка проверки расписаний в PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         for d, day_name in week_dates:
@@ -540,38 +492,8 @@ class ScheduleManager:
                     if schedule:
                         logger.debug(f"Загружено расписание для {date_str} из PostgreSQL")
                         return schedule
-            except ImportError:
-                # Fallback на асинхронную загрузку
-                pool = _get_pool()
-                if pool and load_schedule_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
-                            db_schedule = future.result(timeout=30)
-                        except RuntimeError:
-                            db_schedule = asyncio.run(load_schedule_from_db(date_str))
-                        
-                        if db_schedule:
-                            for day_name, employees_str in db_schedule.items():
-                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                                if employee_manager:
-                                    formatted_employees = []
-                                    for emp in employees:
-                                        if '(@' in emp and emp.endswith(')'):
-                                            formatted_employees.append(emp)
-                                        else:
-                                            formatted_employees.append(employee_manager.format_employee_name(emp))
-                                    schedule[day_name] = formatted_employees
-                                else:
-                                    schedule[day_name] = employees
-                            if schedule:
-                                logger.debug(f"Загружено расписание для {date_str} из PostgreSQL")
-                                return schedule
-                    except Exception as e:
-                        logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в PostgreSQL/Google Sheets)
         schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
@@ -786,43 +708,14 @@ class ScheduleManager:
             try:
                 logger.info(f"   Выполняю save_schedule_to_db({date_str}, {day_name}, {len(employees_str)} символов)...")
                 # Используем синхронную функцию для записи
-                try:
-                    from database_sync import save_schedule_to_db_sync
-                    logger.info(f"   Используем синхронное сохранение расписания в PostgreSQL...")
-                    result = save_schedule_to_db_sync(date_str, day_name, employees_str)
-                    logger.info(f"   Получен результат: {result}")
-                    if result:
-                        logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
-                    else:
-                        logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
-                except ImportError:
-                    # Fallback на асинхронную запись
-                    try:
-                        loop = asyncio.get_running_loop()
-                        logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
-                        future = asyncio.run_coroutine_threadsafe(
-                            save_schedule_to_db(date_str, day_name, employees_str),
-                            loop
-                        )
-                        logger.info(f"   Ожидаю результат (timeout=30)...")
-                        result = future.result(timeout=30)  # Ждем результат
-                        logger.info(f"   Получен результат: {result}")
-                        if result:
-                            logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
-                        else:
-                            logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
-                    except RuntimeError:
-                        logger.info(f"   Event loop не запущен, использую asyncio.run...")
-                        result = asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
-                        logger.info(f"   Получен результат: {result}")
-                        if result:
-                            logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
-                        else:
-                            logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
-                    except Exception as e:
-                        logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
-                except Exception as e:
-                    logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL (sync): {e}", exc_info=True)
+                from database_sync import save_schedule_to_db_sync
+                logger.info(f"   Используем синхронное сохранение расписания в PostgreSQL...")
+                result = save_schedule_to_db_sync(date_str, day_name, employees_str)
+                logger.info(f"   Получен результат: {result}")
+                if result:
+                    logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
+                else:
+                    logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка при сохранении расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         else:
@@ -902,39 +795,14 @@ class ScheduleManager:
         if USE_POSTGRESQL and pool and add_to_queue_db:
             try:
                 # Используем синхронную функцию для добавления
-                try:
-                    from database_sync import add_to_queue_db_sync
-                    logger.info(f"   Используем синхронное добавление в очередь PostgreSQL...")
-                    result = add_to_queue_db_sync(date_str, employee_name, telegram_id)
-                    logger.info(f"   Получен результат: {result}")
-                    if result:
-                        logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
-                    else:
-                        logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
-                except ImportError:
-                    # Fallback на асинхронную операцию
-                    try:
-                        loop = asyncio.get_running_loop()
-                        logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
-                        future = asyncio.run_coroutine_threadsafe(
-                            add_to_queue_db(date_str, employee_name, telegram_id),
-                            loop
-                        )
-                        logger.info(f"   Ожидаю результат (timeout=30)...")
-                        result = future.result(timeout=30)  # Ждем результат
-                        logger.info(f"   Получен результат: {result}")
-                        if result:
-                            logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
-                        else:
-                            logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
-                    except RuntimeError:
-                        logger.info(f"   Event loop не запущен, использую asyncio.run...")
-                        result = asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
-                        logger.info(f"   Получен результат: {result}")
-                        if result:
-                            logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
-                        else:
-                            logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
+                from database_sync import add_to_queue_db_sync
+                logger.info(f"   Используем синхронное добавление в очередь PostgreSQL...")
+                result = add_to_queue_db_sync(date_str, employee_name, telegram_id)
+                logger.info(f"   Получен результат: {result}")
+                if result:
+                    logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
+                else:
+                    logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка добавления в очередь в PostgreSQL: {e}", exc_info=True)
         else:
@@ -976,26 +844,8 @@ class ScheduleManager:
                     queue = db_queue
                     logger.debug(f"Очередь для {date_str} загружена из PostgreSQL: {len(queue)} записей")
                     return queue
-            except ImportError:
-                # Fallback на асинхронную загрузку
-                pool = _get_pool()
-                if pool and load_queue_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            future = asyncio.run_coroutine_threadsafe(load_queue_from_db(date_str), loop)
-                            db_queue = future.result(timeout=30)
-                        except RuntimeError:
-                            db_queue = asyncio.run(load_queue_from_db(date_str))
-                        
-                        if db_queue:
-                            queue = db_queue
-                            logger.debug(f"Очередь для {date_str} загружена из PostgreSQL: {len(queue)} записей")
-                            return queue
-                    except Exception as e:
-                        logger.warning(f"Ошибка загрузки очереди из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Ошибка загрузки очереди из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки очереди из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -1061,32 +911,12 @@ class ScheduleManager:
         if USE_POSTGRESQL and pool and remove_from_queue_db:
             try:
                 # Используем синхронную функцию для удаления
-                try:
-                    from database_sync import remove_from_queue_db_sync
-                    result = remove_from_queue_db_sync(date_str, telegram_id)
-                    if result:
-                        logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
-                    else:
-                        logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
-                except ImportError:
-                    # Fallback на асинхронную операцию
-                    try:
-                        loop = asyncio.get_running_loop()
-                        future = asyncio.run_coroutine_threadsafe(
-                            remove_from_queue_db(date_str, telegram_id),
-                            loop
-                        )
-                        result = future.result(timeout=30)  # Ждем результат
-                        if result:
-                            logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
-                        else:
-                            logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
-                    except RuntimeError:
-                        result = asyncio.run(remove_from_queue_db(date_str, telegram_id))
-                        if result:
-                            logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
-                        else:
-                            logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
+                from database_sync import remove_from_queue_db_sync
+                result = remove_from_queue_db_sync(date_str, telegram_id)
+                if result:
+                    logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
+                else:
+                    logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка удаления из очереди в PostgreSQL: {e}", exc_info=True)
         
@@ -1187,41 +1017,18 @@ class ScheduleManager:
         days_skip_str = ','.join(days_skipped) if days_skipped else ''
         
         # Сохраняем в PostgreSQL (приоритет 1)
-        pool = _get_pool()
-        logger.info(f"🔄 Начинаю сохранение заявки в PostgreSQL: {employee_name} (неделя {week_str})...")
-        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_request_to_db={save_request_to_db is not None}")
-        if USE_POSTGRESQL and pool and save_request_to_db:
+        # Сохраняем в PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL:
             try:
-                logger.info(f"   Выполняю save_request_to_db(неделя={week_str}, сотрудник={employee_name}, ID={telegram_id})...")
-                try:
-                    loop = asyncio.get_running_loop()
-                    logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped),
-                        loop
-                    )
-                    logger.info(f"   Ожидаю результат (timeout=30)...")
-                    result = future.result(timeout=30)  # Ждем результат
-                    logger.info(f"   Получен результат: {result}")
-                    if result:
-                        logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
-                    else:
-                        logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
-                except RuntimeError:
-                    logger.info(f"   Event loop не запущен, использую asyncio.run...")
-                    result = asyncio.run(save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped))
-                    logger.info(f"   Получен результат: {result}")
-                    if result:
-                        logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
-                    else:
-                        logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
-                except Exception as e:
-                    logger.error(f"❌ Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
+                from database_sync import save_request_to_db_sync
+                logger.info(f"🔄 Начинаю сохранение заявки в PostgreSQL: {employee_name} (неделя {week_str})...")
+                result = save_request_to_db_sync(week_str, employee_name, telegram_id, days_requested, days_skipped)
+                if result:
+                    logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
+                else:
+                    logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
             except Exception as e:
-                logger.error(f"❌ Критическая ошибка при сохранении заявки в PostgreSQL: {e}", exc_info=True)
-        else:
-            pool = _get_pool()
-            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения заявки: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_request_to_db={save_request_to_db is not None}")
+                logger.error(f"❌ Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -1418,17 +1225,10 @@ class ScheduleManager:
         week_str = week_start.strftime('%Y-%m-%d')
         
         # Удаляем из PostgreSQL (приоритет 1)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and clear_requests_from_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
-                        clear_requests_from_db(week_str),
-                        loop
-                    )
-                except RuntimeError:
-                    asyncio.run(clear_requests_from_db(week_str))
+                from database_sync import clear_requests_from_db_sync
+                clear_requests_from_db_sync(week_str)
             except Exception as e:
                 logger.warning(f"Ошибка очистки заявок в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         

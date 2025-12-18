@@ -286,3 +286,239 @@ def add_to_queue_db_sync(date_str: str, employee_name: str, telegram_id: int) ->
         if conn:
             conn.close()
 
+
+def save_default_schedule_to_db_sync(schedule: Dict[str, Dict[str, str]]) -> bool:
+    """Синхронное сохранение расписания по умолчанию в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            for day_name, places_dict in schedule.items():
+                places_json = json.dumps(places_dict, ensure_ascii=False)
+                cur.execute("""
+                    INSERT INTO default_schedule (day_name, places_json)
+                    VALUES (%s, %s)
+                    ON CONFLICT (day_name) DO UPDATE SET
+                        places_json = EXCLUDED.places_json,
+                        updated_at = NOW()
+                """, (day_name, places_json))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения расписания по умолчанию в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_request_to_db_sync(week_start_str: str, employee_name: str, telegram_id: int,
+                            days_requested: List[str], days_skipped: List[str]) -> bool:
+    """Синхронное сохранение заявки на неделю в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        week_start_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+        days_requested_str = ','.join(days_requested) if days_requested else None
+        days_skipped_str = ','.join(days_skipped) if days_skipped else None
+        
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO requests (week_start, employee_name, telegram_id, days_requested, days_skipped)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (week_start, telegram_id) DO UPDATE SET
+                    employee_name = EXCLUDED.employee_name,
+                    days_requested = EXCLUDED.days_requested,
+                    days_skipped = EXCLUDED.days_skipped,
+                    updated_at = NOW()
+            """, (week_start_date, employee_name, telegram_id, days_requested_str, days_skipped_str))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения заявки в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def clear_requests_from_db_sync(week_start_str: str) -> bool:
+    """Синхронная очистка заявок на неделю из PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        week_start_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM requests WHERE week_start = %s", (week_start_date,))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка очистки заявок в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_employee_to_db_sync(telegram_id: int, manual_name: str, telegram_name: str = None, 
+                             username: str = None, approved_by_admin: bool = False) -> bool:
+    """Синхронное сохранение/обновление сотрудника в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO employees (telegram_id, manual_name, telegram_name, username, approved_by_admin)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (telegram_id) DO UPDATE SET
+                    manual_name = EXCLUDED.manual_name,
+                    telegram_name = EXCLUDED.telegram_name,
+                    username = EXCLUDED.username,
+                    approved_by_admin = EXCLUDED.approved_by_admin,
+                    updated_at = NOW()
+            """, (telegram_id, manual_name, telegram_name or '', username, approved_by_admin))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения сотрудника в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_admins_to_db_sync(admin_ids: Set[int]) -> bool:
+    """Синхронное сохранение администраторов в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            # Удаляем всех текущих админов
+            cur.execute("DELETE FROM admins")
+            # Вставляем новых
+            if admin_ids:
+                cur.executemany(
+                    "INSERT INTO admins (telegram_id) VALUES (%s) ON CONFLICT (telegram_id) DO NOTHING",
+                    [(admin_id,) for admin_id in admin_ids]
+                )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения администраторов в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def add_admin_to_db_sync(telegram_id: int) -> bool:
+    """Синхронное добавление администратора в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO admins (telegram_id) VALUES (%s) ON CONFLICT (telegram_id) DO NOTHING",
+                (telegram_id,)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка добавления администратора в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def remove_admin_from_db_sync(telegram_id: int) -> bool:
+    """Синхронное удаление администратора из PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM admins WHERE telegram_id = %s", (telegram_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления администратора из PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_pending_employee_to_db_sync(username: str, manual_name: str) -> bool:
+    """Синхронное сохранение отложенного сотрудника в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO pending_employees (username, manual_name)
+                VALUES (%s, %s)
+                ON CONFLICT (username) DO UPDATE SET
+                    manual_name = EXCLUDED.manual_name,
+                    updated_at = NOW()
+            """, (username, manual_name))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения отложенного сотрудника в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def remove_pending_employee_from_db_sync(username: str) -> bool:
+    """Синхронное удаление отложенного сотрудника из PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM pending_employees WHERE username = %s", (username,))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления отложенного сотрудника из PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()

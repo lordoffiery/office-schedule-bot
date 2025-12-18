@@ -95,30 +95,8 @@ class EmployeeManager:
                 logger.debug("Используем синхронную загрузку сотрудников из PostgreSQL")
                 db_employees = load_employees_from_db_sync()
                 logger.debug("load_employees_from_db_sync завершен успешно")
-            except ImportError:
-                # Fallback на асинхронную загрузку
-                pool = _get_pool()
-                if pool and load_employees_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_employees_from_db")
-                            future = asyncio.run_coroutine_threadsafe(load_employees_from_db(), loop)
-                            db_employees = future.result(timeout=30)
-                            logger.debug("load_employees_from_db завершен успешно")
-                        except RuntimeError:
-                            logger.debug("Event loop не запущен, используем asyncio.run для load_employees_from_db")
-                            db_employees = asyncio.run(load_employees_from_db())
-                        except Exception as e:
-                            logger.warning(f"Ошибка при выполнении load_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
-                            db_employees = None
-                    except Exception as e:
-                        logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
-                        db_employees = None
-                else:
-                    db_employees = None
             except Exception as e:
-                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
                 db_employees = None
             
             if db_employees:
@@ -257,24 +235,19 @@ class EmployeeManager:
     
     def _sync_employees_to_postgresql(self):
         """Синхронизировать сотрудников с PostgreSQL"""
-        pool = _get_pool()
-        if not USE_POSTGRESQL or not pool or not save_employee_to_db:
+        if not USE_POSTGRESQL:
             return
         
-        for telegram_id, (manual_name, telegram_name, username) in self.employees.items():
-            approved = self.approved_by_admin.get(telegram_id, False)
-            try:
+        try:
+            from database_sync import save_employee_to_db_sync
+            for telegram_id, (manual_name, telegram_name, username) in self.employees.items():
+                approved = self.approved_by_admin.get(telegram_id, False)
                 try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved),
-                        loop
-                    )
-                    future.result(timeout=30)  # Ждем результат
-                except RuntimeError:
-                    asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved))
-            except Exception as e:
-                logger.error(f"❌ Ошибка синхронизации сотрудника {telegram_id} с PostgreSQL: {e}", exc_info=True)
+                    save_employee_to_db_sync(telegram_id, manual_name, telegram_name, username, approved)
+                except Exception as e:
+                    logger.error(f"❌ Ошибка синхронизации сотрудника {telegram_id} с PostgreSQL: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"❌ Ошибка синхронизации сотрудников с PostgreSQL: {e}", exc_info=True)
     
     def _sync_employees_to_google_sheets(self):
         """Синхронизировать сотрудников с Google Sheets"""
@@ -329,18 +302,10 @@ class EmployeeManager:
         self.approved_by_admin[telegram_id] = True
         
         # Сохраняем в PostgreSQL
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and save_employee_to_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_employee_to_db(telegram_id, name, telegram_name, username, True),
-                        loop
-                    )
-                    future.result(timeout=30)  # Ждем результат
-                except RuntimeError:
-                    asyncio.run(save_employee_to_db(telegram_id, name, telegram_name, username, True))
+                from database_sync import save_employee_to_db_sync
+                save_employee_to_db_sync(telegram_id, name, telegram_name, username, True)
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}", exc_info=True)
         
@@ -387,30 +352,8 @@ class EmployeeManager:
                 logger.debug("Используем синхронную загрузку отложенных сотрудников из PostgreSQL")
                 db_pending = load_pending_employees_from_db_sync()
                 logger.debug("load_pending_employees_from_db_sync завершен успешно")
-            except ImportError:
-                # Fallback на асинхронную загрузку
-                pool = _get_pool()
-                if pool and load_pending_employees_from_db:
-                    try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_pending_employees_from_db")
-                            future = asyncio.run_coroutine_threadsafe(load_pending_employees_from_db(), loop)
-                            db_pending = future.result(timeout=30)
-                            logger.debug("load_pending_employees_from_db завершен успешно")
-                        except RuntimeError:
-                            logger.debug("Event loop не запущен, используем asyncio.run для load_pending_employees_from_db")
-                            db_pending = asyncio.run(load_pending_employees_from_db())
-                        except Exception as e:
-                            logger.warning(f"Ошибка при выполнении load_pending_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
-                            db_pending = None
-                    except Exception as e:
-                        logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
-                        db_pending = None
-                else:
-                    db_pending = None
             except Exception as e:
-                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
                 db_pending = None
             
             if db_pending:
@@ -481,25 +424,18 @@ class EmployeeManager:
     
     def _sync_pending_employees_to_postgresql(self):
         """Синхронизировать отложенных сотрудников с PostgreSQL"""
-        pool = _get_pool()
-        if not USE_POSTGRESQL or not pool or not save_pending_employee_to_db:
+        if not USE_POSTGRESQL:
             return
         
-        for username, manual_name in self.pending_employees.items():
-            try:
+        try:
+            from database_sync import save_pending_employee_to_db_sync
+            for username, manual_name in self.pending_employees.items():
                 try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_pending_employee_to_db(username, manual_name),
-                        loop
-                    )
-                    future.result(timeout=30)  # Ждем результат
-                except RuntimeError:
-                    asyncio.run(save_pending_employee_to_db(username, manual_name))
+                    save_pending_employee_to_db_sync(username, manual_name)
                 except Exception as e:
-                    logger.warning(f"Ошибка при выполнении save_pending_employee_to_db: {type(e).__name__}: {e}", exc_info=True)
-            except Exception as e:
-                logger.error(f"❌ Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                    logger.error(f"❌ Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"❌ Ошибка синхронизации отложенных сотрудников с PostgreSQL: {e}", exc_info=True)
     
     def _sync_pending_employees_to_google_sheets(self):
         """Синхронизировать отложенных сотрудников с Google Sheets"""
@@ -540,18 +476,10 @@ class EmployeeManager:
         self.pending_employees[username_lower] = manual_name
         
         # Сохраняем в PostgreSQL
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and save_pending_employee_to_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_pending_employee_to_db(username_lower, manual_name),
-                        loop
-                    )
-                    future.result(timeout=30)  # Ждем результат
-                except RuntimeError:
-                    asyncio.run(save_pending_employee_to_db(username_lower, manual_name))
+                from database_sync import save_pending_employee_to_db_sync
+                save_pending_employee_to_db_sync(username_lower, manual_name)
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения отложенного сотрудника {username_lower} в PostgreSQL: {e}", exc_info=True)
         
@@ -571,18 +499,10 @@ class EmployeeManager:
             del self.pending_employees[username_lower]
             
             # Удаляем из PostgreSQL
-            pool = _get_pool()
-            if USE_POSTGRESQL and pool and remove_pending_employee_from_db:
+            if USE_POSTGRESQL:
                 try:
-                    try:
-                        loop = asyncio.get_running_loop()
-                        future = asyncio.run_coroutine_threadsafe(
-                            remove_pending_employee_from_db(username_lower),
-                            loop
-                        )
-                        future.result(timeout=30)  # Ждем результат
-                    except RuntimeError:
-                        asyncio.run(remove_pending_employee_from_db(username_lower))
+                    from database_sync import remove_pending_employee_from_db_sync
+                    remove_pending_employee_from_db_sync(username_lower)
                 except Exception as e:
                     logger.error(f"❌ Ошибка удаления отложенного сотрудника {username_lower} из PostgreSQL: {e}", exc_info=True)
             
@@ -605,19 +525,11 @@ class EmployeeManager:
                 self.employees[telegram_id] = (manual_name, telegram_name, username or old_username)
                 
                 # Сохраняем в PostgreSQL
-                pool = _get_pool()
-                if USE_POSTGRESQL and pool and save_employee_to_db:
+                if USE_POSTGRESQL:
                     approved = self.approved_by_admin.get(telegram_id, True)
                     try:
-                        try:
-                            loop = asyncio.get_running_loop()
-                            future = asyncio.run_coroutine_threadsafe(
-                                save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved),
-                                loop
-                            )
-                            future.result(timeout=30)  # Ждем результат
-                        except RuntimeError:
-                            asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved))
+                        from database_sync import save_employee_to_db_sync
+                        save_employee_to_db_sync(telegram_id, manual_name, telegram_name, username or old_username, approved)
                     except Exception as e:
                         logger.error(f"❌ Ошибка обновления сотрудника {telegram_id} в PostgreSQL: {e}", exc_info=True)
                 
@@ -646,18 +558,10 @@ class EmployeeManager:
         self.approved_by_admin[telegram_id] = was_added_by_admin
         
         # Сохраняем в PostgreSQL
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and save_employee_to_db:
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    future = asyncio.run_coroutine_threadsafe(
-                        save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin),
-                        loop
-                    )
-                    future.result(timeout=30)  # Ждем результат
-                except RuntimeError:
-                    asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin))
+                from database_sync import save_employee_to_db_sync
+                save_employee_to_db_sync(telegram_id, manual_name, telegram_name, username, was_added_by_admin)
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}", exc_info=True)
         
