@@ -88,21 +88,38 @@ class EmployeeManager:
         self.approved_by_admin = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and load_employees_from_db:
+        # Используем синхронные функции для загрузки при старте
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_employees_from_db")
-                    future = asyncio.run_coroutine_threadsafe(load_employees_from_db(), loop)
-                    db_employees = future.result(timeout=30)
-                    logger.debug("load_employees_from_db завершен успешно")
-                except RuntimeError:
-                    logger.debug("Event loop не запущен, используем asyncio.run для load_employees_from_db")
-                    db_employees = asyncio.run(load_employees_from_db())
-                except Exception as e:
-                    logger.warning(f"Ошибка при выполнении load_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
+                from database_sync import load_employees_from_db_sync
+                logger.debug("Используем синхронную загрузку сотрудников из PostgreSQL")
+                db_employees = load_employees_from_db_sync()
+                logger.debug("load_employees_from_db_sync завершен успешно")
+            except ImportError:
+                # Fallback на асинхронную загрузку
+                pool = _get_pool()
+                if pool and load_employees_from_db:
+                    try:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_employees_from_db")
+                            future = asyncio.run_coroutine_threadsafe(load_employees_from_db(), loop)
+                            db_employees = future.result(timeout=30)
+                            logger.debug("load_employees_from_db завершен успешно")
+                        except RuntimeError:
+                            logger.debug("Event loop не запущен, используем asyncio.run для load_employees_from_db")
+                            db_employees = asyncio.run(load_employees_from_db())
+                        except Exception as e:
+                            logger.warning(f"Ошибка при выполнении load_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
+                            db_employees = None
+                    except Exception as e:
+                        logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                        db_employees = None
+                else:
                     db_employees = None
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                db_employees = None
                 
                 if db_employees:
                     for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
@@ -365,21 +382,38 @@ class EmployeeManager:
         self.pending_employees = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and load_pending_employees_from_db:
+        # Используем синхронные функции для загрузки при старте
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_pending_employees_from_db")
-                    future = asyncio.run_coroutine_threadsafe(load_pending_employees_from_db(), loop)
-                    db_pending = future.result(timeout=30)
-                    logger.debug("load_pending_employees_from_db завершен успешно")
-                except RuntimeError:
-                    logger.debug("Event loop не запущен, используем asyncio.run для load_pending_employees_from_db")
-                    db_pending = asyncio.run(load_pending_employees_from_db())
-                except Exception as e:
-                    logger.warning(f"Ошибка при выполнении load_pending_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
+                from database_sync import load_pending_employees_from_db_sync
+                logger.debug("Используем синхронную загрузку отложенных сотрудников из PostgreSQL")
+                db_pending = load_pending_employees_from_db_sync()
+                logger.debug("load_pending_employees_from_db_sync завершен успешно")
+            except ImportError:
+                # Fallback на асинхронную загрузку
+                pool = _get_pool()
+                if pool and load_pending_employees_from_db:
+                    try:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_pending_employees_from_db")
+                            future = asyncio.run_coroutine_threadsafe(load_pending_employees_from_db(), loop)
+                            db_pending = future.result(timeout=30)
+                            logger.debug("load_pending_employees_from_db завершен успешно")
+                        except RuntimeError:
+                            logger.debug("Event loop не запущен, используем asyncio.run для load_pending_employees_from_db")
+                            db_pending = asyncio.run(load_pending_employees_from_db())
+                        except Exception as e:
+                            logger.warning(f"Ошибка при выполнении load_pending_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
+                            db_pending = None
+                    except Exception as e:
+                        logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                        db_pending = None
+                else:
                     db_pending = None
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                db_pending = None
                 
                 if db_pending:
                     self.pending_employees = db_pending
