@@ -24,11 +24,18 @@ async def init_db():
     """Инициализировать подключение к базе данных и создать таблицы"""
     global _pool
     
+    logger.info("🔧 Инициализация PostgreSQL...")
+    logger.info(f"   DATABASE_URL установлен: {DATABASE_URL is not None}")
+    if DATABASE_URL:
+        logger.info(f"   DATABASE_URL начинается с: {DATABASE_URL[:20]}..." if len(DATABASE_URL) > 20 else f"   DATABASE_URL: {DATABASE_URL}")
+    
     if not DATABASE_URL:
-        logger.warning("DATABASE_URL не установлен, пропускаем инициализацию БД")
+        logger.warning("⚠️ DATABASE_URL не установлен, пропускаем инициализацию БД")
+        logger.warning("   Проверьте переменные окружения: DATABASE_URL или DATABASE_PUBLIC_URL")
         return False
     
     try:
+        logger.info("   Создаю пул подключений к PostgreSQL...")
         # Создаем пул подключений
         _pool = await asyncpg.create_pool(
             DATABASE_URL,
@@ -36,15 +43,20 @@ async def init_db():
             max_size=10,
             command_timeout=60
         )
+        logger.info(f"   Пул подключений создан: {_pool is not None}")
         logger.info("✅ Подключение к PostgreSQL установлено")
         
         # Создаем таблицы
+        logger.info("   Создаю/проверяю таблицы...")
         await create_tables()
         logger.info("✅ Таблицы в PostgreSQL созданы/проверены")
         
+        logger.info(f"   Финальное состояние: _pool={_pool is not None}")
         return True
     except Exception as e:
         logger.error(f"❌ Ошибка подключения к PostgreSQL: {e}", exc_info=True)
+        logger.error(f"   _pool после ошибки: {_pool is not None}")
+        _pool = None  # Убеждаемся, что _pool = None при ошибке
         return False
 
 
