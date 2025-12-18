@@ -108,6 +108,21 @@ def day_to_short(day: str) -> str:
     return day_map.get(day, day[:2])
 
 
+# Middleware для автоматической синхронизации после каждой команды
+class SyncMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
+        event: Message,
+        data: Dict[str, Any]
+    ) -> Any:
+        # Выполняем обработчик команды
+        result = await handler(event, data)
+        # После выполнения команды запускаем синхронизацию (в фоне)
+        await sync_postgresql_to_sheets()
+        return result
+
+
 def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -> str:
     """
     Форматировать расписание с указанием мест для каждого сотрудника
