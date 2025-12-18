@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from aiogram import Bot, Dispatcher, BaseMiddleware
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
 from typing import Callable, Dict, Any, Awaitable
@@ -106,6 +106,42 @@ def day_to_short(day: str) -> str:
         'Пятница': 'Пт'
     }
     return day_map.get(day, day[:2])
+
+
+def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Создать основную клавиатуру с кнопками команд"""
+    is_admin = admin_manager.is_admin(user_id)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 Моё расписание", callback_data="cmd_my_schedule"),
+            InlineKeyboardButton(text="📋 Полное расписание", callback_data="cmd_full_schedule")
+        ],
+        [
+            InlineKeyboardButton(text="➕ Добавить день", callback_data="cmd_add_day"),
+            InlineKeyboardButton(text="➖ Пропустить день", callback_data="cmd_skip_day")
+        ],
+        [
+            InlineKeyboardButton(text="📝 Указать дни недели", callback_data="cmd_set_week_days"),
+            InlineKeyboardButton(text="ℹ️ Помощь", callback_data="cmd_help")
+        ]
+    ])
+    
+    if is_admin:
+        # Добавляем админские кнопки
+        admin_buttons = [
+            [
+                InlineKeyboardButton(text="👤 Добавить сотрудника", callback_data="cmd_admin_add_employee"),
+                InlineKeyboardButton(text="👑 Добавить админа", callback_data="cmd_admin_add_admin")
+            ],
+            [
+                InlineKeyboardButton(text="📊 Список админов", callback_data="cmd_admin_list_admins"),
+                InlineKeyboardButton(text="🔄 Синхронизация", callback_data="cmd_admin_sync_from_sheets")
+            ]
+        ]
+        keyboard.inline_keyboard.extend(admin_buttons)
+    
+    return keyboard
 
 
 # Глобальные переменные для синхронизации
@@ -304,7 +340,8 @@ async def cmd_start(message: Message):
         # Пользователь уже был зарегистрирован
         response = "Вы уже зарегистрированы! Используйте /help для списка команд."
     
-    await message.reply(response)
+    keyboard = get_main_keyboard(user_id)
+    await message.reply(response, reply_markup=keyboard)
     log_command(user_id, username, user_name, "/start", response)
     # Запускаем синхронизацию после команды (в фоне)
     await sync_postgresql_to_sheets()
@@ -356,7 +393,8 @@ async def cmd_help(message: Message):
             "   Используйте после ручного изменения данных в Google Sheets"
         )
     
-    await message.reply(help_text)
+    keyboard = get_main_keyboard(user_id)
+    await message.reply(help_text, reply_markup=keyboard)
     log_command(user_id, username, first_name, "/help", help_text[:200])
 
 
@@ -630,7 +668,8 @@ async def cmd_my_schedule(message: Message):
         remote_days_short = [day_to_short(day) for day in remote_days]
         message_text += f"🏠 Дни удаленно: {', '.join(remote_days_short)}\n"
     
-    await message.reply(message_text)
+    keyboard = get_main_keyboard(user_id)
+    await message.reply(message_text, reply_markup=keyboard)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/my_schedule", message_text)
 
 
@@ -1013,7 +1052,8 @@ async def cmd_full_schedule(message: Message):
     message_text = f"📅 Расписание на {date.strftime('%d.%m.%Y')}:\n\n"
     message_text += format_schedule_with_places(schedule, default_schedule)
     
-    await message.reply(message_text)
+    keyboard = get_main_keyboard(user_id)
+    await message.reply(message_text, reply_markup=keyboard)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", message_text[:200])
 
 
@@ -2006,6 +2046,9 @@ async def main():
     
     # Регистрируем middleware для автоматической синхронизации после каждой команды
     dp.message.middleware(SyncMiddleware())
+    
+    # Регистрируем обработчики callback-запросов для кнопок
+    dp.callback_query.middleware(SyncMiddleware())
     
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
     health_thread = threading.Thread(target=start_health_server, daemon=True)
