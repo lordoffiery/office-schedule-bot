@@ -516,14 +516,15 @@ class EmployeeManager:
                 try:
                     try:
                         loop = asyncio.get_running_loop()
-                        asyncio.run_coroutine_threadsafe(
+                        future = asyncio.run_coroutine_threadsafe(
                             remove_pending_employee_from_db(username_lower),
                             loop
                         )
+                        future.result(timeout=5)  # Ждем результат
                     except RuntimeError:
                         asyncio.run(remove_pending_employee_from_db(username_lower))
                 except Exception as e:
-                    logger.warning(f"Ошибка удаления отложенного сотрудника {username_lower} из PostgreSQL: {e}")
+                    logger.error(f"❌ Ошибка удаления отложенного сотрудника {username_lower} из PostgreSQL: {e}", exc_info=True)
             
             # Сохраняем в Google Sheets и файл
             self._save_pending_employees()
