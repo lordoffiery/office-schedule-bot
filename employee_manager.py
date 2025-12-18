@@ -7,7 +7,8 @@ import asyncio
 from typing import Dict, Optional, List, Tuple
 from config import (
     EMPLOYEES_FILE, DATA_DIR, PENDING_EMPLOYEES_FILE,
-    USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES, USE_POSTGRESQL
+    USE_GOOGLE_SHEETS, USE_GOOGLE_SHEETS_FOR_WRITES, USE_GOOGLE_SHEETS_FOR_READS,
+    SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES, USE_POSTGRESQL
 )
 from utils import get_header_start_idx, filter_empty_rows
 
@@ -111,8 +112,8 @@ class EmployeeManager:
                 self._sync_employees_to_google_sheets()
                 return
         
-        # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
-        if self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и PostgreSQL недоступен)
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для листа employees
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_EMPLOYEES)
             
@@ -186,8 +187,8 @@ class EmployeeManager:
             logger.error(f"Ошибка загрузки сотрудников: {e}")
         
         # Если не загрузилось из файла, пробуем загрузить из Google Sheets
-        # (но только если нет буферизованных операций, чтобы не перезаписать актуальные данные)
-        if not self.employees and self.sheets_manager and self.sheets_manager.is_available():
+        # (но только если USE_GOOGLE_SHEETS_FOR_READS включен и нет буферизованных операций)
+        if USE_GOOGLE_SHEETS_FOR_READS and not self.employees and self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для листа employees
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_EMPLOYEES)
             
@@ -265,15 +266,16 @@ class EmployeeManager:
             logger.warning(f"Ошибка синхронизации сотрудников с Google Sheets: {e}")
     
     def _save_employees(self):
-        """Сохранить список сотрудников в PostgreSQL, Google Sheets и файл"""
+        """Сохранить список сотрудников в PostgreSQL и файл"""
         # Сохраняем в файл
         self._save_employees_to_file_only()
         
         # Сохраняем в PostgreSQL (приоритет 1)
         self._sync_employees_to_postgresql()
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        self._sync_employees_to_google_sheets()
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES:
+        #     self._sync_employees_to_google_sheets()
     
     def add_employee(self, name: str, telegram_id: int, telegram_name: Optional[str] = None, username: Optional[str] = None) -> bool:
         """Добавить сотрудника"""
@@ -361,12 +363,10 @@ class EmployeeManager:
                 logger.info(f"Отложенные сотрудники загружены из PostgreSQL: {len(self.pending_employees)} записей")
                 # Сохраняем в файл для совместимости
                 self._save_pending_employees_to_file_only()
-                # Синхронизируем с Google Sheets
-                self._sync_pending_employees_to_google_sheets()
                 return
         
-        # ПРИОРИТЕТ 2: Google Sheets
-        if self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен)
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
                 rows = filter_empty_rows(rows)
@@ -451,15 +451,16 @@ class EmployeeManager:
             logger.warning(f"Ошибка синхронизации отложенных сотрудников с Google Sheets: {e}")
     
     def _save_pending_employees(self):
-        """Сохранить отложенные записи сотрудников в PostgreSQL, Google Sheets и файл"""
+        """Сохранить отложенные записи сотрудников в PostgreSQL и файл"""
         # Сохраняем в файл
         self._save_pending_employees_to_file_only()
         
         # Сохраняем в PostgreSQL (приоритет 1)
         self._sync_pending_employees_to_postgresql()
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        self._sync_pending_employees_to_google_sheets()
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES:
+        #     self._sync_pending_employees_to_google_sheets()
     
     def add_pending_employee(self, username: str, manual_name: str) -> tuple[bool, Optional[str]]:
         """

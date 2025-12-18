@@ -1816,6 +1816,45 @@ async def main():
     if admin_manager.sheets_manager:
         admin_manager.sheets_manager.start_buffer_flusher()
     
+    # Запускаем задачу для периодической синхронизации PostgreSQL -> Google Sheets
+    # (Google Sheets используется только как веб-интерфейс, синхронизация выполняется раз в час)
+    async def sync_postgresql_to_sheets_periodically():
+        """Периодическая синхронизация данных из PostgreSQL в Google Sheets"""
+        from config import USE_GOOGLE_SHEETS
+        if not USE_GOOGLE_SHEETS:
+            return
+        
+        # Ждем 5 минут после старта бота перед первой синхронизацией
+        await asyncio.sleep(300)  # 5 минут
+        
+        while True:
+            try:
+                logger.info("🔄 Начинаю периодическую синхронизацию PostgreSQL -> Google Sheets...")
+                # Импортируем функции синхронизации
+                import subprocess
+                import sys
+                # Запускаем скрипт синхронизации в отдельном процессе
+                result = subprocess.run(
+                    [sys.executable, 'sync_postgresql_to_sheets.py'],
+                    capture_output=True,
+                    text=True,
+                    timeout=300  # 5 минут таймаут
+                )
+                if result.returncode == 0:
+                    logger.info("✅ Синхронизация PostgreSQL -> Google Sheets завершена успешно")
+                else:
+                    logger.warning(f"⚠️ Синхронизация завершилась с ошибкой: {result.stderr}")
+            except Exception as e:
+                logger.error(f"❌ Ошибка при синхронизации PostgreSQL -> Google Sheets: {e}", exc_info=True)
+            
+            # Ждем 1 час до следующей синхронизации
+            await asyncio.sleep(3600)  # 1 час
+    
+    # Запускаем задачу синхронизации только если PostgreSQL используется
+    if use_postgresql:
+        asyncio.create_task(sync_postgresql_to_sheets_periodically())
+        logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждый час)")
+    
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
     health_thread = threading.Thread(target=start_health_server, daemon=True)
     health_thread.start()

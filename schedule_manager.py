@@ -10,7 +10,8 @@ from typing import Dict, List, Optional, Tuple
 from config import (
     SCHEDULES_DIR, REQUESTS_DIR, QUEUE_DIR, DEFAULT_SCHEDULE_FILE, 
     DEFAULT_SCHEDULE, MAX_OFFICE_SEATS, DATA_DIR,
-    USE_GOOGLE_SHEETS, SHEET_REQUESTS, SHEET_SCHEDULES, SHEET_QUEUE, SHEET_DEFAULT_SCHEDULE,
+    USE_GOOGLE_SHEETS, USE_GOOGLE_SHEETS_FOR_WRITES, USE_GOOGLE_SHEETS_FOR_READS,
+    SHEET_REQUESTS, SHEET_SCHEDULES, SHEET_QUEUE, SHEET_DEFAULT_SCHEDULE,
     USE_POSTGRESQL
 )
 import pytz
@@ -134,8 +135,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
-        # ПРИОРИТЕТ 2: Google Sheets
-        if self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен)
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
                 rows = filter_empty_rows(rows)
@@ -206,8 +207,8 @@ class ScheduleManager:
                 logger.error(f"Ошибка загрузки расписания по умолчанию: {e}")
         
         # Если не загрузилось из файла, пробуем загрузить из Google Sheets
-        # (но только если нет буферизованных операций, чтобы не перезаписать актуальные данные)
-        if not schedule and self.sheets_manager and self.sheets_manager.is_available():
+        # (но только если USE_GOOGLE_SHEETS_FOR_READS включен и нет буферизованных операций)
+        if USE_GOOGLE_SHEETS_FOR_READS and not schedule and self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для листа default_schedule
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_DEFAULT_SCHEDULE)
             
@@ -266,21 +267,21 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}", exc_info=True)
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                rows_to_save = [['day_name', 'places_json']]  # Заголовок
-                for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                    places_dict = schedule.get(day_name, {})
-                    # Сохраняем как JSON строку
-                    places_json = json.dumps(places_dict, ensure_ascii=False)
-                    rows_to_save.append([day_name, places_json])
-                
-                # Перезаписываем весь лист
-                self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
-                logger.debug(f"Расписание по умолчанию сохранено в Google Sheets")
-            except Exception as e:
-                logger.warning(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         rows_to_save = [['day_name', 'places_json']]  # Заголовок
+        #         for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+        #             places_dict = schedule.get(day_name, {})
+        #             # Сохраняем как JSON строку
+        #             places_json = json.dumps(places_dict, ensure_ascii=False)
+        #             rows_to_save.append([day_name, places_json])
+        #         
+        #         # Перезаписываем весь лист
+        #         self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
+        #         logger.debug(f"Расписание по умолчанию сохранено в Google Sheets")
+        #     except Exception as e:
+        #         logger.warning(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}")
         
         # Сохраняем в файл как JSON
         try:
@@ -433,10 +434,10 @@ class ScheduleManager:
             if os.path.exists(schedule_file):
                 return True
         
-        # ПРИОРИТЕТ 3: Google Sheets
+        # ПРИОРИТЕТ 3: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен)
         # ВАЖНО: Проверяем наличие буферизованных операций - если есть, не проверяем Google Sheets
         # чтобы не перезаписать актуальные данные из локальных файлов
-        if self.sheets_manager and self.sheets_manager.is_available():
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_SCHEDULES)
             if has_buffered:
                 logger.debug(f"Есть буферизованные операции для {SHEET_SCHEDULES}, пропускаем проверку Google Sheets")
@@ -528,8 +529,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"Ошибка загрузки расписания на {date_str}: {e}")
         
-        # ПРИОРИТЕТ 3: Google Sheets
-        if self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 3: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен)
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для schedules
             # Если есть, приоритет отдаем локальным файлам (которые мы уже проверили выше)
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_SCHEDULES)
@@ -596,39 +597,39 @@ class ScheduleManager:
                 except Exception as e:
                     logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                rows_to_save = []
-                for date, day_name in week_dates:
-                    date_str = date.strftime('%Y-%m-%d')
-                    employees = schedule.get(day_name, [])
-                    employees_str = ', '.join(employees)
-                    rows_to_save.append([date_str, day_name, employees_str])
-                
-                # Обновляем записи для этой недели
-                worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
-                if worksheet:
-                    all_rows = worksheet.get_all_values()
-                    all_rows = filter_empty_rows(all_rows)
-                    
-                    # Получаем даты недели
-                    week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
-                    
-                    # Пропускаем заголовок, если есть
-                    start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
-                    rows_to_keep = [all_rows[0]] if has_header else [['date', 'day_name', 'employees']]
-                    
-                    # Оставляем только записи не для этой недели
-                    for row in all_rows[start_idx:]:
-                        if len(row) >= 1 and row[0] and row[0].strip() not in week_dates_str:
-                            rows_to_keep.append(row)
-                    # Добавляем новые записи для этой недели
-                    rows_to_keep.extend(rows_to_save)
-                    # Перезаписываем весь лист
-                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
-            except Exception as e:
-                logger.warning(f"Ошибка сохранения расписания недели в Google Sheets: {e}")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         rows_to_save = []
+        #         for date, day_name in week_dates:
+        #             date_str = date.strftime('%Y-%m-%d')
+        #             employees = schedule.get(day_name, [])
+        #             employees_str = ', '.join(employees)
+        #             rows_to_save.append([date_str, day_name, employees_str])
+        #         
+        #         # Обновляем записи для этой недели
+        #         worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
+        #         if worksheet:
+        #             all_rows = worksheet.get_all_values()
+        #             all_rows = filter_empty_rows(all_rows)
+        #             
+        #             # Получаем даты недели
+        #             week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
+        #             
+        #             # Пропускаем заголовок, если есть
+        #             start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
+        #             rows_to_keep = [all_rows[0]] if has_header else [['date', 'day_name', 'employees']]
+        #             
+        #             # Оставляем только записи не для этой недели
+        #             for row in all_rows[start_idx:]:
+        #                 if len(row) >= 1 and row[0] and row[0].strip() not in week_dates_str:
+        #                     rows_to_keep.append(row)
+        #             # Добавляем новые записи для этой недели
+        #             rows_to_keep.extend(rows_to_save)
+        #             # Перезаписываем весь лист
+        #             self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
+        #     except Exception as e:
+        #         logger.warning(f"Ошибка сохранения расписания недели в Google Sheets: {e}")
         
         # Сохраняем в файлы
         for date, day_name in week_dates:
@@ -715,51 +716,49 @@ class ScheduleManager:
             pool = _get_pool()
             logger.warning(f"⚠️ PostgreSQL недоступен для сохранения расписания {date_str}: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                logger.debug(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
-                # Сохраняем только измененный день (как в файле)
-                row = [date_str, day_name, employees_str]
-                
-                # Обновляем записи в Google Sheets
-                worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
-                if worksheet:
-                    all_rows = worksheet.get_all_values()
-                    all_rows = filter_empty_rows(all_rows)
-                    
-                    # Пропускаем заголовок, если есть
-                    start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
-                    rows_to_keep = [all_rows[0]] if has_header else [['date', 'day_name', 'employees']]
-                    
-                    # Оставляем только записи не для этой даты и дня
-                    found = False
-                    for row_data in all_rows[start_idx:]:
-                        if len(row_data) >= 2 and row_data[0] and row_data[0].strip() == date_str and row_data[1] and row_data[1].strip() == day_name:
-                            # Это запись для этой даты и дня - заменяем её
-                            found = True
-                            logger.info(f"Найдена существующая запись для {date_str} {day_name}, заменяю")
-                            rows_to_keep.append(row)
-                        elif len(row_data) >= 1 and row_data[0] != date_str:
-                            # Запись для другой даты - оставляем
-                            rows_to_keep.append(row_data)
-                    
-                    # Если не нашли существующую запись, добавляем новую
-                    if not found:
-                        logger.info(f"Не найдена существующая запись для {date_str} {day_name}, добавляю новую")
-                        rows_to_keep.append(row)
-                    
-                    # Перезаписываем весь лист
-                    logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets (включая заголовок)")
-                    logger.info(f"Данные для сохранения: date={date_str}, day={day_name}, employees={employees_str[:100]}")
-                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
-                    logger.info(f"✅ Расписание успешно сохранено в Google Sheets для {date_str}")
-                else:
-                    logger.warning(f"Не удалось получить лист {SHEET_SCHEDULES}")
-            except Exception as e:
-                logger.error(f"Ошибка сохранения расписания в Google Sheets: {e}", exc_info=True)
-        else:
-            logger.warning(f"Google Sheets не доступен (sheets_manager={self.sheets_manager}, is_available={self.sheets_manager.is_available() if self.sheets_manager else False})")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         logger.debug(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
+        #         # Сохраняем только измененный день (как в файле)
+        #         row = [date_str, day_name, employees_str]
+        #         
+        #         # Обновляем записи в Google Sheets
+        #         worksheet = self.sheets_manager.get_worksheet(SHEET_SCHEDULES)
+        #         if worksheet:
+        #             all_rows = worksheet.get_all_values()
+        #             all_rows = filter_empty_rows(all_rows)
+        #             
+        #             # Пропускаем заголовок, если есть
+        #             start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
+        #             rows_to_keep = [all_rows[0]] if has_header else [['date', 'day_name', 'employees']]
+        #             
+        #             # Оставляем только записи не для этой даты и дня
+        #             found = False
+        #             for row_data in all_rows[start_idx:]:
+        #                 if len(row_data) >= 2 and row_data[0] and row_data[0].strip() == date_str and row_data[1] and row_data[1].strip() == day_name:
+        #                     # Это запись для этой даты и дня - заменяем её
+        #                     found = True
+        #                     logger.info(f"Найдена существующая запись для {date_str} {day_name}, заменяю")
+        #                     rows_to_keep.append(row)
+        #                 elif len(row_data) >= 1 and row_data[0] != date_str:
+        #                     # Запись для другой даты - оставляем
+        #                     rows_to_keep.append(row_data)
+        #             
+        #             # Если не нашли существующую запись, добавляем новую
+        #             if not found:
+        #                 logger.info(f"Не найдена существующая запись для {date_str} {day_name}, добавляю новую")
+        #                 rows_to_keep.append(row)
+        #             
+        #             # Перезаписываем весь лист
+        #             logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets (включая заголовок)")
+        #             logger.info(f"Данные для сохранения: date={date_str}, day={day_name}, employees={employees_str[:100]}")
+        #             self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
+        #             logger.info(f"✅ Расписание успешно сохранено в Google Sheets для {date_str}")
+        #         else:
+        #             logger.warning(f"Не удалось получить лист {SHEET_SCHEDULES}")
+        #     except Exception as e:
+        #         logger.error(f"Ошибка сохранения расписания в Google Sheets: {e}", exc_info=True)
         
         # Сохраняем в файл
         with open(schedule_file, 'w', encoding='utf-8') as f:
@@ -802,13 +801,13 @@ class ScheduleManager:
             pool = _get_pool()
             logger.warning(f"⚠️ PostgreSQL недоступен для добавления в очередь: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                row = [date_str, employee_name, str(telegram_id)]
-                self.sheets_manager.append_row(SHEET_QUEUE, row)
-            except Exception as e:
-                logger.warning(f"Ошибка сохранения в очередь в Google Sheets: {e}")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         row = [date_str, employee_name, str(telegram_id)]
+        #         self.sheets_manager.append_row(SHEET_QUEUE, row)
+        #     except Exception as e:
+        #         logger.warning(f"Ошибка сохранения в очередь в Google Sheets: {e}")
         
         # Добавляем в очередь (файл)
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -860,8 +859,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"Ошибка загрузки очереди: {e}")
         
-        # ПРИОРИТЕТ 3: Google Sheets (если локальных файлов нет)
-        if not queue and self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 3: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и локальных файлов нет)
+        if USE_GOOGLE_SHEETS_FOR_READS and not queue and self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_QUEUE)
                 rows = filter_empty_rows(rows)
@@ -913,38 +912,36 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Ошибка удаления из очереди в PostgreSQL: {e}", exc_info=True)
         
-        # Обновляем в Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                # Удаляем все записи для этой даты и добавляем обновленные
-                worksheet = self.sheets_manager.get_worksheet(SHEET_QUEUE)
-                if worksheet:
-                    all_rows = worksheet.get_all_values()
-                    logger.info(f"Всего строк в Google Sheets: {len(all_rows)}")
-                    
-                    all_rows = filter_empty_rows(all_rows)
-                    
-                    # Пропускаем заголовок
-                    start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
-                    rows_to_keep = [all_rows[0]] if has_header else [['date', 'employee_name', 'telegram_id']]
-                    
-                    # Оставляем только записи не для этой даты
-                    for row in all_rows[start_idx:]:
-                        if len(row) >= 1 and row[0] != date_str:
-                            rows_to_keep.append(row)
-                    
-                    # Добавляем обновленные записи для этой даты (если очередь не пуста)
-                    for entry in queue:
-                        rows_to_keep.append([date_str, entry['employee_name'], str(entry['telegram_id'])])
-                    
-                    logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets (включая заголовок)")
-                    # Перезаписываем весь лист (даже если очередь пуста - это удалит запись)
-                    self.sheets_manager.write_rows(SHEET_QUEUE, rows_to_keep, clear_first=True)
-                    logger.info(f"Очередь обновлена в Google Sheets")
-            except Exception as e:
-                logger.error(f"Ошибка обновления очереди в Google Sheets: {e}", exc_info=True)
-        else:
-            logger.warning(f"Google Sheets не доступен для обновления очереди")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         # Удаляем все записи для этой даты и добавляем обновленные
+        #         worksheet = self.sheets_manager.get_worksheet(SHEET_QUEUE)
+        #         if worksheet:
+        #             all_rows = worksheet.get_all_values()
+        #             logger.info(f"Всего строк в Google Sheets: {len(all_rows)}")
+        #             
+        #             all_rows = filter_empty_rows(all_rows)
+        #             
+        #             # Пропускаем заголовок
+        #             start_idx, has_header = get_header_start_idx(all_rows, ['date', 'date_str', 'Дата'])
+        #             rows_to_keep = [all_rows[0]] if has_header else [['date', 'employee_name', 'telegram_id']]
+        #             
+        #             # Оставляем только записи не для этой даты
+        #             for row in all_rows[start_idx:]:
+        #                 if len(row) >= 1 and row[0] != date_str:
+        #                     rows_to_keep.append(row)
+        #             
+        #             # Добавляем обновленные записи для этой даты (если очередь не пуста)
+        #             for entry in queue:
+        #                 rows_to_keep.append([date_str, entry['employee_name'], str(entry['telegram_id'])])
+        #             
+        #             logger.info(f"Сохраняю {len(rows_to_keep)} строк в Google Sheets (включая заголовок)")
+        #             # Перезаписываем весь лист (даже если очередь пуста - это удалит запись)
+        #             self.sheets_manager.write_rows(SHEET_QUEUE, rows_to_keep, clear_first=True)
+        #             logger.info(f"Очередь обновлена в Google Sheets")
+        #     except Exception as e:
+        #         logger.error(f"Ошибка обновления очереди в Google Sheets: {e}", exc_info=True)
         
         # Сохраняем обновленную очередь в файл
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -1023,29 +1020,29 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
         
-        # Сохраняем в Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                # Проверяем, есть ли заголовок, если нет - добавляем
-                worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
-                if worksheet:
-                    all_rows = worksheet.get_all_values()
-                    all_rows = filter_empty_rows(all_rows)
-                    
-                    # Проверяем, есть ли заголовок
-                    _, has_header = get_header_start_idx(all_rows, ['week_start', 'week', 'Неделя', 'employee_name'])
-                    
-                    # Если заголовка нет, добавляем его
-                    if not has_header:
-                        header = ['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']
-                        self.sheets_manager.write_rows(SHEET_REQUESTS, [header], clear_first=True)
-                        logger.debug(f"Добавлен заголовок в лист {SHEET_REQUESTS}")
-                
-                # Формируем строку для таблицы: [week_start, employee_name, telegram_id, days_requested, days_skipped]
-                row = [week_str, employee_name, str(telegram_id), days_req_str, days_skip_str]
-                self.sheets_manager.append_row(SHEET_REQUESTS, row)
-            except Exception as e:
-                logger.warning(f"Ошибка сохранения заявки в Google Sheets: {e}")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         # Проверяем, есть ли заголовок, если нет - добавляем
+        #         worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
+        #         if worksheet:
+        #             all_rows = worksheet.get_all_values()
+        #             all_rows = filter_empty_rows(all_rows)
+        #             
+        #             # Проверяем, есть ли заголовок
+        #             _, has_header = get_header_start_idx(all_rows, ['week_start', 'week', 'Неделя', 'employee_name'])
+        #             
+        #             # Если заголовка нет, добавляем его
+        #             if not has_header:
+        #                 header = ['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']
+        #                 self.sheets_manager.write_rows(SHEET_REQUESTS, [header], clear_first=True)
+        #                 logger.debug(f"Добавлен заголовок в лист {SHEET_REQUESTS}")
+        #         
+        #         # Формируем строку для таблицы: [week_start, employee_name, telegram_id, days_requested, days_skipped]
+        #         row = [week_str, employee_name, str(telegram_id), days_req_str, days_skip_str]
+        #         self.sheets_manager.append_row(SHEET_REQUESTS, row)
+        #     except Exception as e:
+        #         logger.warning(f"Ошибка сохранения заявки в Google Sheets: {e}")
         
         # Сохраняем в файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
@@ -1135,8 +1132,8 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"Ошибка загрузки заявок: {e}")
         
-        # ПРИОРИТЕТ 3: Google Sheets (если локальных файлов нет)
-        if not requests_dict and self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 3: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и локальных файлов нет)
+        if USE_GOOGLE_SHEETS_FOR_READS and not requests_dict and self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
                 rows = filter_empty_rows(rows)
@@ -1192,26 +1189,26 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Ошибка очистки заявок в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
-        # Удаляем из Google Sheets (приоритет 2)
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
-                if worksheet:
-                    all_rows = worksheet.get_all_values()
-                    all_rows = filter_empty_rows(all_rows)
-                    
-                    # Пропускаем заголовок
-                    start_idx, has_header = get_header_start_idx(all_rows, ['week_start', 'week', 'Неделя', 'employee_name'])
-                    rows_to_keep = [all_rows[0]] if has_header else [['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']]
-                    
-                    # Оставляем только записи не для этой недели
-                    for row in all_rows[start_idx:]:
-                        if len(row) >= 1 and row[0] and row[0].strip() != week_str:
-                            rows_to_keep.append(row)
-                    # Перезаписываем весь лист
-                    self.sheets_manager.write_rows(SHEET_REQUESTS, rows_to_keep, clear_first=True)
-            except Exception as e:
-                logger.warning(f"Ошибка очистки заявок в Google Sheets: {e}")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
+        #         if worksheet:
+        #             all_rows = worksheet.get_all_values()
+        #             all_rows = filter_empty_rows(all_rows)
+        #             
+        #             # Пропускаем заголовок
+        #             start_idx, has_header = get_header_start_idx(all_rows, ['week_start', 'week', 'Неделя', 'employee_name'])
+        #             rows_to_keep = [all_rows[0]] if has_header else [['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']]
+        #             
+        #             # Оставляем только записи не для этой недели
+        #             for row in all_rows[start_idx:]:
+        #                 if len(row) >= 1 and row[0] and row[0].strip() != week_str:
+        #                     rows_to_keep.append(row)
+        #             # Перезаписываем весь лист
+        #             self.sheets_manager.write_rows(SHEET_REQUESTS, rows_to_keep, clear_first=True)
+        #     except Exception as e:
+        #         logger.warning(f"Ошибка очистки заявок в Google Sheets: {e}")
         
         # Удаляем файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
@@ -1459,8 +1456,10 @@ class ScheduleManager:
     
     def update_employee_name_in_schedules(self, old_name: str, new_formatted_name: str):
         """Обновить имя сотрудника во всех расписаниях в Google Sheets (вкладка schedules)"""
-        if not self.sheets_manager or not self.sheets_manager.is_available():
-            return
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if not USE_GOOGLE_SHEETS_FOR_WRITES or not self.sheets_manager or not self.sheets_manager.is_available():
+        #     return
+        return  # Отключено для ускорения работы бота
         
         try:
             rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
@@ -1508,10 +1507,10 @@ class ScheduleManager:
                     # Оставляем строку без изменений (некорректный формат)
                     rows_to_save.append(row)
             
-            # Если были изменения, сохраняем обновленные данные
-            if updated:
-                self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
-                logger.info(f"Обновлено имя сотрудника '{old_name}' → '{new_formatted_name}' во всех расписаниях в Google Sheets")
+            # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+            # if USE_GOOGLE_SHEETS_FOR_WRITES and updated:
+            #     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
+            #     logger.info(f"Обновлено имя сотрудника '{old_name}' → '{new_formatted_name}' во всех расписаниях в Google Sheets")
         except Exception as e:
             logger.error(f"Ошибка обновления имени сотрудника в расписаниях: {e}")
     
@@ -1569,65 +1568,64 @@ class ScheduleManager:
             self.save_default_schedule(default_schedule)
             logger.info(f"Обновлено {updated_default_count} имен в default_schedule")
         
-        # Обновляем schedules в Google Sheets
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
-                rows = filter_empty_rows(rows)
-                start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
-                
-                rows_to_save = []
-                
-                # Сохраняем заголовок
-                if has_header:
-                    rows_to_save.append(rows[0])
-                else:
-                    rows_to_save.append(['date', 'day_name', 'employees'])
-                
-                # Обрабатываем все строки
-                for row in rows[start_idx:]:
-                    if len(row) >= 3 and row[2]:  # Проверяем, что есть список сотрудников
-                        employees_str = row[2].strip()
-                        employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                        
-                        # Обновляем имена сотрудников
-                        updated_row = False
-                        new_employees = []
-                        for emp in employees:
-                            plain_name = self.get_plain_name_from_formatted(emp)
-                            # Ищем сотрудника по имени
-                            telegram_id = self.employee_manager.get_employee_id(plain_name)
-                            if telegram_id:
-                                formatted_name = self.employee_manager.format_employee_name_by_id(telegram_id)
-                                # Если имя изменилось (добавился username), обновляем
-                                if formatted_name != emp:
-                                    new_employees.append(formatted_name)
-                                    updated_row = True
-                                    updated_schedules_count += 1
-                                else:
-                                    new_employees.append(emp)
-                            else:
-                                # Сотрудник не найден, оставляем как есть
-                                new_employees.append(emp)
-                        
-                        if updated_row:
-                            # Обновляем строку с новым списком сотрудников
-                            new_row = row.copy()
-                            new_row[2] = ', '.join(new_employees)
-                            rows_to_save.append(new_row)
-                        else:
-                            # Оставляем строку без изменений
-                            rows_to_save.append(row)
-                    else:
-                        # Оставляем строку без изменений (некорректный формат)
-                        rows_to_save.append(row)
-                
-                # Сохраняем обновленные данные
-                if updated_schedules_count > 0:
-                    self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
-                    logger.info(f"Обновлено {updated_schedules_count} имен в schedules")
-            except Exception as e:
-                logger.error(f"Ошибка обновления schedules: {e}")
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
+        #     try:
+        #         rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+        #         rows = filter_empty_rows(rows)
+        #         start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+        #         
+        #         rows_to_save = []
+        #         
+        #         # Сохраняем заголовок
+        #         if has_header:
+        #             rows_to_save.append(rows[0])
+        #         else:
+        #             rows_to_save.append(['date', 'day_name', 'employees'])
+        #         
+        #         # Обрабатываем все строки
+        #         for row in rows[start_idx:]:
+        #             if len(row) >= 3 and row[2]:  # Проверяем, что есть список сотрудников
+        #                 employees_str = row[2].strip()
+        #                 employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+        #                 
+        #                 # Обновляем имена сотрудников
+        #                 updated_row = False
+        #                 new_employees = []
+        #                 for emp in employees:
+        #                     plain_name = self.get_plain_name_from_formatted(emp)
+        #                     # Ищем сотрудника по имени
+        #                     telegram_id = self.employee_manager.get_employee_id(plain_name)
+        #                     if telegram_id:
+        #                         formatted_name = self.employee_manager.format_employee_name_by_id(telegram_id)
+        #                         # Если имя изменилось (добавился username), обновляем
+        #                         if formatted_name != emp:
+        #                             new_employees.append(formatted_name)
+        #                             updated_row = True
+        #                             updated_schedules_count += 1
+        #                         else:
+        #                             new_employees.append(emp)
+        #                     else:
+        #                         # Сотрудник не найден, оставляем как есть
+        #                         new_employees.append(emp)
+        #                 
+        #                 if updated_row:
+        #                     # Обновляем строку с новым списком сотрудников
+        #                     new_row = row.copy()
+        #                     new_row[2] = ', '.join(new_employees)
+        #                     rows_to_save.append(new_row)
+        #                 else:
+        #                     # Оставляем строку без изменений
+        #                     rows_to_save.append(row)
+        #             else:
+        #                 # Оставляем строку без изменений (некорректный формат)
+        #                 rows_to_save.append(row)
+        #         
+        #         if updated_schedules_count > 0:
+        #             self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
+        #             logger.info(f"Обновлено {updated_schedules_count} имен в schedules")
+        #     except Exception as e:
+        #         logger.error(f"Ошибка обновления schedules: {e}")
         
         return updated_default_count, updated_schedules_count
 

@@ -7,7 +7,7 @@ import logging
 import asyncio
 from datetime import datetime
 from collections import deque
-from config import TIMEZONE, USE_GOOGLE_SHEETS, SHEET_LOGS, USE_POSTGRESQL
+from config import TIMEZONE, USE_GOOGLE_SHEETS, USE_GOOGLE_SHEETS_FOR_WRITES, SHEET_LOGS, USE_POSTGRESQL
 import pytz
 
 timezone = pytz.timezone(TIMEZONE)
@@ -104,24 +104,24 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
             # Добавляем в буфер для повторной попытки
             _log_buffer.append(('postgresql', row))
     
-    # Сохраняем в Google Sheets (приоритет 2, для совместимости)
-    if sheets_manager and sheets_manager.is_available():
-        try:
-            # Используем PRIORITY_LOW для логов - они будут пропущены при превышении лимита API
-            from google_sheets_manager import PRIORITY_LOW
-            success = sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
-            
-            # Если не удалось записать (например, из-за лимита API), добавляем в буфер
-            if not success:
-                _log_buffer.append(('sheets', row))
-                logger.debug(f"Лог добавлен в буфер Google Sheets (размер буфера: {len(_log_buffer)})")
-        except Exception as e:
-            # Обрабатываем только критические ошибки (не 429)
-            # Ошибка 429 (превышение лимита) обрабатывается внутри append_row и не попадает сюда
-            # Логируем только другие ошибки
-            error_str = str(e)
-            if '429' not in error_str and 'Quota exceeded' not in error_str:
-                logging.warning(f"Ошибка записи лога в Google Sheets: {e}")
+    # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+    # if USE_GOOGLE_SHEETS_FOR_WRITES and sheets_manager and sheets_manager.is_available():
+    #     try:
+    #         # Используем PRIORITY_LOW для логов - они будут пропущены при превышении лимита API
+    #         from google_sheets_manager import PRIORITY_LOW
+    #         success = sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)
+    #         
+    #         # Если не удалось записать (например, из-за лимита API), добавляем в буфер
+    #         if not success:
+    #             _log_buffer.append(('sheets', row))
+    #             logger.debug(f"Лог добавлен в буфер Google Sheets (размер буфера: {len(_log_buffer)})")
+    #     except Exception as e:
+    #         # Обрабатываем только критические ошибки (не 429)
+    #         # Ошибка 429 (превышение лимита) обрабатывается внутри append_row и не попадает сюда
+    #         # Логируем только другие ошибки
+    #         error_str = str(e)
+    #         if '429' not in error_str and 'Quota exceeded' not in error_str:
+    #             logging.warning(f"Ошибка записи лога в Google Sheets: {e}")
             # При любой ошибке добавляем в буфер
             _log_buffer.append(('sheets', row))
     else:
@@ -176,7 +176,7 @@ async def flush_log_buffer():
                     except Exception as e:
                         logger.warning(f"Ошибка отправки лога в PostgreSQL из буфера: {e}")
                 
-                elif target == 'sheets' and sheets_manager and sheets_manager.is_available():
+                elif target == 'sheets' and USE_GOOGLE_SHEETS_FOR_WRITES and sheets_manager and sheets_manager.is_available():
                     try:
                         from google_sheets_manager import PRIORITY_LOW
                         success = sheets_manager.append_row(SHEET_LOGS, row, priority=PRIORITY_LOW)

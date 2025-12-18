@@ -38,9 +38,12 @@ PENDING_EMPLOYEES_FILE = f'{DATA_DIR}/pending_employees.txt'
 DATABASE_URL = os.getenv('DATABASE_URL') or os.getenv('DATABASE_PUBLIC_URL')
 USE_POSTGRESQL = DATABASE_URL is not None  # Автоматически определяется наличием DATABASE_URL
 
-# Google Sheets настройки (опционально, используется одновременно с PostgreSQL для синхронизации)
-# Во время миграции оба хранилища работают одновременно
+# Google Sheets настройки
+# USE_GOOGLE_SHEETS_FOR_WRITES = False означает, что Google Sheets используется только как веб-интерфейс
+# Бот не будет писать в Google Sheets при выполнении команд, только читать при старте (опционально)
 USE_GOOGLE_SHEETS = os.getenv('USE_GOOGLE_SHEETS', 'true').lower() == 'true'
+USE_GOOGLE_SHEETS_FOR_WRITES = os.getenv('USE_GOOGLE_SHEETS_FOR_WRITES', 'false').lower() == 'true'  # По умолчанию отключено
+USE_GOOGLE_SHEETS_FOR_READS = os.getenv('USE_GOOGLE_SHEETS_FOR_READS', 'false').lower() == 'true'  # По умолчанию отключено (используем только PostgreSQL)
 GOOGLE_SHEETS_ID = os.getenv('GOOGLE_SHEETS_ID', '13zmdoS160B5Hn0Cl-q2hNrEgyZVc6Jh0JaxUnI9jSFg')  # ID из URL
 GOOGLE_SHEETS_CREDENTIALS = os.getenv('GOOGLE_SHEETS_CREDENTIALS', '')
 GOOGLE_CREDENTIALS_FILE = os.getenv('GOOGLE_CREDENTIALS_FILE', 'google_credentials.json')

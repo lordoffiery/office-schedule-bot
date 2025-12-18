@@ -5,7 +5,7 @@ import os
 import logging
 import asyncio
 from typing import List, Set
-from config import ADMINS_FILE, DATA_DIR, ADMIN_IDS, USE_GOOGLE_SHEETS, SHEET_ADMINS, USE_POSTGRESQL
+from config import ADMINS_FILE, DATA_DIR, ADMIN_IDS, USE_GOOGLE_SHEETS, USE_GOOGLE_SHEETS_FOR_WRITES, USE_GOOGLE_SHEETS_FOR_READS, SHEET_ADMINS, USE_POSTGRESQL
 from utils import get_header_start_idx, filter_empty_rows
 
 # Настройка логирования
@@ -93,8 +93,8 @@ class AdminManager:
                 self._sync_to_google_sheets()
                 return
         
-        # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
-        if self.sheets_manager and self.sheets_manager.is_available():
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и PostgreSQL недоступен)
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для листа admins
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_ADMINS)
             
@@ -198,8 +198,9 @@ class AdminManager:
         # Сохраняем в PostgreSQL (приоритет 1)
         self._sync_to_postgresql()
         
-        # Сохраняем в Google Sheets (приоритет 2, для совместимости)
-        self._sync_to_google_sheets()
+        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
+        # if USE_GOOGLE_SHEETS_FOR_WRITES:
+        #     self._sync_to_google_sheets()
     
     def add_admin(self, telegram_id: int) -> bool:
         """Добавить администратора"""
