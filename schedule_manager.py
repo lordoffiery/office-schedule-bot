@@ -708,11 +708,21 @@ class ScheduleManager:
                         save_schedule_to_db(date_str, day_name, employees_str),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    result = future.result(timeout=5)  # Ждем результат
+                    if result:
+                        logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
+                    else:
+                        logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
                 except RuntimeError:
-                    asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
+                    result = asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
+                    if result:
+                        logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
+                    else:
+                        logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+                logger.error(f"❌ Критическая ошибка при сохранении расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():

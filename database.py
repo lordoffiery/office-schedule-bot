@@ -399,6 +399,7 @@ async def load_schedule_from_db(date_str: str) -> Optional[Dict[str, str]]:
 async def save_schedule_to_db(date_str: str, day_name: str, employees_str: str) -> bool:
     """Сохранить расписание на дату в PostgreSQL"""
     if not _pool:
+        logger.warning(f"⚠️ PostgreSQL pool недоступен, не могу сохранить расписание {date_str}")
         return False
     
     try:
@@ -417,9 +418,10 @@ async def save_schedule_to_db(date_str: str, day_name: str, employees_str: str) 
                     employees = EXCLUDED.employees,
                     updated_at = NOW()
             """, schedule_date, day_name, employees_str)
+            logger.debug(f"✅ Расписание {date_str} ({day_name}) успешно сохранено в PostgreSQL")
             return True
     except Exception as e:
-        logger.error(f"Ошибка сохранения расписания в PostgreSQL: {e}")
+        logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         return False
 
 
