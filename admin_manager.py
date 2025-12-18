@@ -72,25 +72,39 @@ class AdminManager:
         # Очищаем текущие данные перед загрузкой
         self.admins = set()
         
-        # ПРИОРИТЕТ 1: PostgreSQL (если доступен и loop запущен)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and load_admins_from_db:
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        # Используем синхронные функции для загрузки при старте
+        if USE_POSTGRESQL:
             try:
-                # Пытаемся получить текущий event loop
-                try:
-                    loop = asyncio.get_running_loop()
-                    logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_admins_from_db")
-                    # Loop уже запущен, используем run_coroutine_threadsafe
-                    future = asyncio.run_coroutine_threadsafe(load_admins_from_db(), loop)
-                    db_admins = future.result(timeout=30)
-                    logger.debug("load_admins_from_db завершен успешно")
-                except RuntimeError:
-                    logger.debug("Event loop не запущен, используем asyncio.run для load_admins_from_db")
-                    # Loop не запущен, используем asyncio.run
-                    db_admins = asyncio.run(load_admins_from_db())
-                except Exception as e:
-                    logger.warning(f"Ошибка при выполнении load_admins_from_db: {type(e).__name__}: {e}", exc_info=True)
+                from database_sync import load_admins_from_db_sync
+                logger.debug("Используем синхронную загрузку администраторов из PostgreSQL")
+                db_admins = load_admins_from_db_sync()
+                logger.debug("load_admins_from_db_sync завершен успешно")
+            except ImportError:
+                # Fallback на асинхронную загрузку
+                pool = _get_pool()
+                if pool and load_admins_from_db:
+                    try:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            logger.debug("Event loop запущен, используем run_coroutine_threadsafe для load_admins_from_db")
+                            future = asyncio.run_coroutine_threadsafe(load_admins_from_db(), loop)
+                            db_admins = future.result(timeout=30)
+                            logger.debug("load_admins_from_db завершен успешно")
+                        except RuntimeError:
+                            logger.debug("Event loop не запущен, используем asyncio.run для load_admins_from_db")
+                            db_admins = asyncio.run(load_admins_from_db())
+                        except Exception as e:
+                            logger.warning(f"Ошибка при выполнении load_admins_from_db: {type(e).__name__}: {e}", exc_info=True)
+                            db_admins = None
+                    except Exception as e:
+                        logger.warning(f"Ошибка загрузки администраторов из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                        db_admins = None
+                else:
                     db_admins = None
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки администраторов из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
+                db_admins = None
                 
                 if db_admins:
                     self.admins = db_admins
