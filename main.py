@@ -491,7 +491,7 @@ async def cmd_my_schedule(message: Message):
     week_dates = schedule_manager.get_week_dates(current_week_start)
     
     if has_saved_schedules:
-        # Используем сохраненные расписания
+        # Используем сохраненные расписания (load_schedule_for_date вернет default_schedule для дат без сохраненных данных)
         schedule = {}
         for date, day_name in week_dates:
             day_schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
@@ -500,14 +500,6 @@ async def cmd_my_schedule(message: Message):
         # Загружаем заявки на неделю и строим расписание с учетом заявок
         requests = schedule_manager.load_requests_for_week(current_week_start)
         schedule = schedule_manager.build_schedule_from_requests(current_week_start, requests, employee_manager)
-        
-        # Если расписание пустое (нет заявок), используем расписание по умолчанию
-        if not schedule or all(not employees for employees in schedule.values()):
-            default_schedule = schedule_manager.load_default_schedule()
-            default_schedule_list = schedule_manager._default_schedule_to_list(default_schedule)
-            schedule = {}
-            for day_name, employees in default_schedule_list.items():
-                schedule[day_name] = [employee_manager.format_employee_name(emp) for emp in employees] if employee_manager else employees
     
     # Загружаем default_schedule для определения реальных мест
     default_schedule = schedule_manager.load_default_schedule()
@@ -936,7 +928,7 @@ async def cmd_full_schedule(message: Message):
     week_dates = schedule_manager.get_week_dates(week_start)
     
     if has_saved_schedules:
-        # Используем сохраненные расписания
+        # Используем сохраненные расписания (load_schedule_for_date вернет default_schedule для дат без сохраненных данных)
         schedule = {}
         for d, day_name in week_dates:
             day_schedule = schedule_manager.load_schedule_for_date(d, employee_manager)
@@ -945,14 +937,6 @@ async def cmd_full_schedule(message: Message):
         # Загружаем заявки на неделю и строим расписание с учетом заявок
         requests = schedule_manager.load_requests_for_week(week_start)
         schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
-        
-        # Если расписание пустое (нет заявок), используем расписание по умолчанию
-        if not schedule or all(not employees for employees in schedule.values()):
-            default_schedule = schedule_manager.load_default_schedule()
-            default_schedule_list = schedule_manager._default_schedule_to_list(default_schedule)
-            schedule = {}
-            for day_name, employees in default_schedule_list.items():
-                schedule[day_name] = [employee_manager.format_employee_name(emp) for emp in employees] if employee_manager else employees
     
     # Загружаем default_schedule для определения реальных мест
     default_schedule = schedule_manager.load_default_schedule()
