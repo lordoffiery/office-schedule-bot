@@ -2096,9 +2096,13 @@ async def main():
         logger.info("⚠️ PostgreSQL недоступен, используем Google Sheets")
         use_postgresql = False
     
-    # Явно загружаем данные из Google Sheets при старте бота (если PostgreSQL не используется)
+    # Загружаем данные при старте бота
     if not use_postgresql:
-        logger.info("Загрузка данных из Google Sheets при старте...")
+        from config import USE_GOOGLE_SHEETS_FOR_READS
+        if USE_GOOGLE_SHEETS_FOR_READS:
+            logger.info("Загрузка данных из Google Sheets при старте...")
+        else:
+            logger.info("Загрузка данных из локальных файлов при старте...")
     try:
         # Перезагружаем данные сотрудников
         employee_manager.reload_employees()
@@ -2113,7 +2117,7 @@ async def main():
         schedule_manager.load_default_schedule()
         logger.info("✅ Расписание по умолчанию загружено")
         
-        # Предзагружаем расписания из Google Sheets для текущей и следующей недели
+        # Предзагружаем расписания для текущей и следующей недели
         # Это гарантирует, что данные будут доступны при первом вызове команд
         now = datetime.now(timezone)
         current_week_start = schedule_manager.get_week_start(now)
@@ -2135,8 +2139,18 @@ async def main():
             except Exception as e:
                 logger.debug(f"Не удалось предзагрузить расписание для {d.strftime('%Y-%m-%d')}: {e}")
         
-        logger.info("✅ Расписания предзагружены из Google Sheets")
-        logger.info("✅ Все данные успешно загружены из Google Sheets")
+        # Определяем реальный источник данных
+        if use_postgresql:
+            logger.info("✅ Расписания предзагружены из PostgreSQL")
+            logger.info("✅ Все данные успешно загружены из PostgreSQL")
+        else:
+            from config import USE_GOOGLE_SHEETS_FOR_READS
+            if USE_GOOGLE_SHEETS_FOR_READS:
+                logger.info("✅ Расписания предзагружены из Google Sheets")
+                logger.info("✅ Все данные успешно загружены из Google Sheets")
+            else:
+                logger.info("✅ Расписания предзагружены из локальных файлов")
+                logger.info("✅ Все данные успешно загружены из локальных файлов")
     except Exception as e:
         logger.error(f"❌ Ошибка при загрузке данных из Google Sheets: {e}", exc_info=True)
         logger.warning("Продолжаем работу с локальными файлами...")
