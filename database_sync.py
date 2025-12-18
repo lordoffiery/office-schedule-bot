@@ -239,6 +239,30 @@ def save_schedule_to_db_sync(date_str: str, day_name: str, employees_str: str) -
             conn.close()
 
 
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def remove_from_queue_db_sync(date_str: str, telegram_id: int) -> bool:
     """Синхронное удаление из очереди на дату в PostgreSQL"""
     conn = _get_connection()
@@ -253,6 +277,30 @@ def remove_from_queue_db_sync(date_str: str, telegram_id: int) -> bool:
             return True
     except Exception as e:
         logger.error(f"Ошибка удаления из очереди в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
         if conn:
             conn.rollback()
         return False
@@ -287,6 +335,30 @@ def add_to_queue_db_sync(date_str: str, employee_name: str, telegram_id: int) ->
             conn.close()
 
 
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def save_default_schedule_to_db_sync(schedule: Dict[str, Dict[str, str]]) -> bool:
     """Синхронное сохранение расписания по умолчанию в PostgreSQL"""
     conn = _get_connection()
@@ -308,6 +380,30 @@ def save_default_schedule_to_db_sync(schedule: Dict[str, Dict[str, str]]) -> boo
             return True
     except Exception as e:
         logger.error(f"Ошибка сохранения расписания по умолчанию в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
         if conn:
             conn.rollback()
         return False
@@ -350,6 +446,30 @@ def save_request_to_db_sync(week_start_str: str, employee_name: str, telegram_id
             conn.close()
 
 
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def clear_requests_from_db_sync(week_start_str: str) -> bool:
     """Синхронная очистка заявок на неделю из PostgreSQL"""
     conn = _get_connection()
@@ -364,6 +484,30 @@ def clear_requests_from_db_sync(week_start_str: str) -> bool:
             return True
     except Exception as e:
         logger.error(f"Ошибка очистки заявок в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
         if conn:
             conn.rollback()
         return False
@@ -403,6 +547,30 @@ def save_employee_to_db_sync(telegram_id: int, manual_name: str, telegram_name: 
             conn.close()
 
 
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def save_admins_to_db_sync(admin_ids: Set[int]) -> bool:
     """Синхронное сохранение администраторов в PostgreSQL"""
     conn = _get_connection()
@@ -423,6 +591,30 @@ def save_admins_to_db_sync(admin_ids: Set[int]) -> bool:
             return True
     except Exception as e:
         logger.error(f"Ошибка сохранения администраторов в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
         if conn:
             conn.rollback()
         return False
@@ -455,6 +647,30 @@ def add_admin_to_db_sync(telegram_id: int) -> bool:
             conn.close()
 
 
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def remove_admin_from_db_sync(telegram_id: int) -> bool:
     """Синхронное удаление администратора из PostgreSQL"""
     conn = _get_connection()
@@ -468,6 +684,30 @@ def remove_admin_from_db_sync(telegram_id: int) -> bool:
             return True
     except Exception as e:
         logger.error(f"Ошибка удаления администратора из PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
         if conn:
             conn.rollback()
         return False
@@ -495,6 +735,30 @@ def save_pending_employee_to_db_sync(username: str, manual_name: str) -> bool:
             return True
     except Exception as e:
         logger.error(f"Ошибка сохранения отложенного сотрудника в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
+    """Синхронное сохранение лога в PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO logs (user_id, username, first_name, command, response)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, username, first_name, command, response))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка сохранения лога в PostgreSQL (sync): {e}")
         if conn:
             conn.rollback()
         return False

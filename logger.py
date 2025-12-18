@@ -170,7 +170,8 @@ async def flush_log_buffer():
                         command = row[4] if len(row) > 4 else ''
                         response = row[5] if len(row) > 5 else ''
                         
-                        await save_log_to_db(user_id, username, first_name, command, response)
+                        from database_sync import save_log_to_db_sync
+                        save_log_to_db_sync(user_id, username, first_name, command, response)
                         success = True
                     except Exception as e:
                         logger.warning(f"Ошибка отправки лога в PostgreSQL из буфера: {e}")
