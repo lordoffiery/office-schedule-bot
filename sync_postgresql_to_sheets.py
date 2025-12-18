@@ -23,7 +23,7 @@ os.environ['USE_GOOGLE_SHEETS'] = 'true'
 
 from config import (
     USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_ADMINS, SHEET_PENDING_EMPLOYEES,
-    SHEET_SCHEDULES, SHEET_DEFAULT_SCHEDULE, SHEET_REQUESTS, SHEET_QUEUE
+    SHEET_SCHEDULES, SHEET_DEFAULT_SCHEDULE, SHEET_REQUESTS, SHEET_QUEUE, SHEET_LOGS
 )
 from database_sync import (
     load_admins_from_db_sync, load_employees_from_db_sync, load_pending_employees_from_db_sync,
@@ -299,6 +299,57 @@ def sync_queue_to_sheets(sheets_manager: GoogleSheetsManager):
         print(f"   ❌ Ошибка синхронизации очереди: {e}")
 
 
+def sync_logs_to_sheets(sheets_manager: GoogleSheetsManager):
+    """Синхронизировать логи из PostgreSQL в Google Sheets"""
+    print("\n📝 Синхронизация логов...")
+    
+    try:
+        from database_sync import _get_connection
+        from psycopg2.extras import RealDictCursor
+        
+        conn = _get_connection()
+        if not conn:
+            print("   ⚠️ PostgreSQL недоступен, пропускаю синхронизацию логов")
+            return
+        
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Загружаем последние 1000 логов (чтобы не перегружать Google Sheets)
+                cur.execute("""
+                    SELECT timestamp, user_id, username, first_name, command, response
+                    FROM logs
+                    ORDER BY timestamp DESC
+                    LIMIT 1000
+                """)
+                
+                rows = cur.fetchall()
+                
+                if not rows:
+                    print("   ⚠️ Нет логов для синхронизации")
+                    return
+                
+                # Формируем строки для Google Sheets
+                sheet_rows = [['timestamp', 'user_id', 'username', 'first_name', 'command', 'response']]  # Заголовок
+                
+                for row in reversed(rows):  # Переворачиваем, чтобы старые логи были первыми
+                    sheet_rows.append([
+                        row['timestamp'].strftime('%Y-%m-%d %H:%M:%S') if row['timestamp'] else '',
+                        str(row['user_id']) if row['user_id'] else '',
+                        row['username'] or '',
+                        row['first_name'] or '',
+                        row['command'] or '',
+                        (row['response'] or '')[:500]  # Ограничиваем длину ответа
+                    ])
+                
+                # Сохраняем в Google Sheets
+                sheets_manager.write_rows(SHEET_LOGS, sheet_rows, clear_first=True)
+                print(f"   ✅ Синхронизировано {len(rows)} логов")
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"   ❌ Ошибка синхронизации логов: {e}")
+
+
 def main():
     """Основная функция"""
     print("=" * 60)
@@ -330,6 +381,7 @@ def main():
     sync_schedules_to_sheets(sheets_manager)
     sync_requests_to_sheets(sheets_manager)
     sync_queue_to_sheets(sheets_manager)
+    sync_logs_to_sheets(sheets_manager)
     
     print("\n" + "=" * 60)
     print("✅ Синхронизация завершена")
