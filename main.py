@@ -1694,8 +1694,6 @@ async def main():
         await test_connection()
         logger.info(f"   _pool после test_connection(): {_pool is not None}")
         logger.info("✅ PostgreSQL инициализирован и готов к работе")
-    else:
-        logger.warning("⚠️ PostgreSQL не инициализирован, проверьте логи выше для деталей")
         
         # Тестируем операции записи/чтения/удаления в PostgreSQL
         logger.info("🧪 Тестирование операций PostgreSQL...")
@@ -1752,6 +1750,7 @@ async def main():
         except Exception as e:
             logger.error(f"❌ ОШИБКА при тестировании PostgreSQL: {e}", exc_info=True)
     else:
+        logger.warning("⚠️ PostgreSQL не инициализирован, проверьте логи выше для деталей")
         logger.info("⚠️ PostgreSQL недоступен, используем Google Sheets")
     
     # Явно загружаем данные из Google Sheets при старте бота (если PostgreSQL не используется)
