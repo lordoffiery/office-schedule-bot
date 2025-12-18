@@ -795,14 +795,23 @@ class ScheduleManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         add_to_queue_db(date_str, employee_name, telegram_id),
                         loop
                     )
+                    result = future.result(timeout=5)  # Ждем результат
+                    if result:
+                        logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
+                    else:
+                        logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
                 except RuntimeError:
-                    asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
+                    result = asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
+                    if result:
+                        logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
+                    else:
+                        logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
-                logger.warning(f"Ошибка добавления в очередь в PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка добавления в очередь в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -907,14 +916,23 @@ class ScheduleManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         remove_from_queue_db(date_str, telegram_id),
                         loop
                     )
+                    result = future.result(timeout=5)  # Ждем результат
+                    if result:
+                        logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
+                    else:
+                        logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
                 except RuntimeError:
-                    asyncio.run(remove_from_queue_db(date_str, telegram_id))
+                    result = asyncio.run(remove_from_queue_db(date_str, telegram_id))
+                    if result:
+                        logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
+                    else:
+                        logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
-                logger.warning(f"Ошибка удаления из очереди в PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка удаления из очереди в PostgreSQL: {e}", exc_info=True)
         
         # Обновляем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
