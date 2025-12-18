@@ -561,7 +561,7 @@ class EmployeeManager:
                 
                 # Сохраняем в PostgreSQL
                 pool = _get_pool()
-        if USE_POSTGRESQL and pool and save_employee_to_db:
+                if USE_POSTGRESQL and pool and save_employee_to_db:
                     approved = self.approved_by_admin.get(telegram_id, True)
                     try:
                         try:
