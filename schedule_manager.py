@@ -251,12 +251,20 @@ class ScheduleManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(save_default_schedule_to_db(schedule), loop)
+                    future = asyncio.run_coroutine_threadsafe(save_default_schedule_to_db(schedule), loop)
+                    result = future.result(timeout=5)  # Ждем результат
+                    if result:
+                        logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
+                    else:
+                        logger.warning("⚠️ Расписание по умолчанию не сохранено в PostgreSQL (вернуло False)")
                 except RuntimeError:
-                    asyncio.run(save_default_schedule_to_db(schedule))
-                logger.debug("Расписание по умолчанию сохранено в PostgreSQL")
+                    result = asyncio.run(save_default_schedule_to_db(schedule))
+                    if result:
+                        logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
+                    else:
+                        logger.warning("⚠️ Расписание по умолчанию не сохранено в PostgreSQL (вернуло False)")
             except Exception as e:
-                logger.warning(f"Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():

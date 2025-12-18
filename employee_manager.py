@@ -234,14 +234,15 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved))
             except Exception as e:
-                logger.warning(f"Ошибка синхронизации сотрудника {telegram_id} с PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка синхронизации сотрудника {telegram_id} с PostgreSQL: {e}", exc_info=True)
     
     def _sync_employees_to_google_sheets(self):
         """Синхронизировать сотрудников с Google Sheets"""
@@ -300,14 +301,15 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_employee_to_db(telegram_id, name, telegram_name, username, True),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, name, telegram_name, username, True))
             except Exception as e:
-                logger.warning(f"Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets и файл
         self._save_employees()
@@ -431,14 +433,15 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_pending_employee_to_db(username, manual_name),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_pending_employee_to_db(username, manual_name))
             except Exception as e:
-                logger.warning(f"Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {e}", exc_info=True)
     
     def _sync_pending_employees_to_google_sheets(self):
         """Синхронизировать отложенных сотрудников с Google Sheets"""
@@ -483,14 +486,15 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_pending_employee_to_db(username_lower, manual_name),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_pending_employee_to_db(username_lower, manual_name))
             except Exception as e:
-                logger.warning(f"Ошибка сохранения отложенного сотрудника {username_lower} в PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка сохранения отложенного сотрудника {username_lower} в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets и файл
         self._save_pending_employees()
@@ -545,14 +549,15 @@ class EmployeeManager:
                     try:
                         try:
                             loop = asyncio.get_running_loop()
-                            asyncio.run_coroutine_threadsafe(
+                            future = asyncio.run_coroutine_threadsafe(
                                 save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved),
                                 loop
                             )
+                            future.result(timeout=5)  # Ждем результат
                         except RuntimeError:
                             asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved))
                     except Exception as e:
-                        logger.warning(f"Ошибка обновления сотрудника {telegram_id} в PostgreSQL: {e}")
+                        logger.error(f"❌ Ошибка обновления сотрудника {telegram_id} в PostgreSQL: {e}", exc_info=True)
                 
                 # Сохраняем в Google Sheets и файл
                 self._save_employees()
@@ -583,14 +588,15 @@ class EmployeeManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin))
             except Exception as e:
-                logger.warning(f"Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}")
+                logger.error(f"❌ Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets и файл
         self._save_employees()
