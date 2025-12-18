@@ -4,12 +4,14 @@
 import os
 import json
 import logging
+import asyncio
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from config import (
     SCHEDULES_DIR, REQUESTS_DIR, QUEUE_DIR, DEFAULT_SCHEDULE_FILE, 
     DEFAULT_SCHEDULE, MAX_OFFICE_SEATS, DATA_DIR,
-    USE_GOOGLE_SHEETS, SHEET_REQUESTS, SHEET_SCHEDULES, SHEET_QUEUE, SHEET_DEFAULT_SCHEDULE
+    USE_GOOGLE_SHEETS, SHEET_REQUESTS, SHEET_SCHEDULES, SHEET_QUEUE, SHEET_DEFAULT_SCHEDULE,
+    USE_POSTGRESQL
 )
 import pytz
 from config import TIMEZONE
@@ -26,6 +28,31 @@ if USE_GOOGLE_SHEETS:
         GoogleSheetsManager = None
 else:
     GoogleSheetsManager = None
+
+# Импортируем функции для работы с PostgreSQL
+if USE_POSTGRESQL:
+    try:
+        from database import (
+            save_schedule_to_db, save_default_schedule_to_db, save_request_to_db,
+            clear_requests_from_db, add_to_queue_db, remove_from_queue_db,
+            _pool
+        )
+    except ImportError:
+        save_schedule_to_db = None
+        save_default_schedule_to_db = None
+        save_request_to_db = None
+        clear_requests_from_db = None
+        add_to_queue_db = None
+        remove_from_queue_db = None
+        _pool = None
+else:
+    save_schedule_to_db = None
+    save_default_schedule_to_db = None
+    save_request_to_db = None
+    clear_requests_from_db = None
+    add_to_queue_db = None
+    remove_from_queue_db = None
+    _pool = None
 
 
 class ScheduleManager:
@@ -190,12 +217,24 @@ class ScheduleManager:
     
     def save_default_schedule(self, schedule: Dict[str, Dict[str, str]]):
         """
-        Сохранить расписание по умолчанию в Google Sheets и файл (JSON формат)
+        Сохранить расписание по умолчанию в PostgreSQL, Google Sheets и файл (JSON формат)
         
         Args:
             schedule: Dict[str, Dict[str, str]] - расписание по дням, где внутренний словарь - места (ключ: "подразделение.место")
         """
-        # Пробуем сохранить в Google Sheets
+        # Сохраняем в PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and save_default_schedule_to_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(save_default_schedule_to_db(schedule), loop)
+                except RuntimeError:
+                    asyncio.run(save_default_schedule_to_db(schedule))
+                logger.debug("Расписание по умолчанию сохранено в PostgreSQL")
+            except Exception as e:
+                logger.warning(f"Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows_to_save = [['day_name', 'places_json']]  # Заголовок
@@ -207,9 +246,9 @@ class ScheduleManager:
                 
                 # Перезаписываем весь лист
                 self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
-                logger.info(f"Расписание по умолчанию сохранено в Google Sheets")
+                logger.debug(f"Расписание по умолчанию сохранено в Google Sheets")
             except Exception as e:
-                logger.error(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}")
         
         # Сохраняем в файл как JSON
         try:
@@ -465,10 +504,28 @@ class ScheduleManager:
         return default_schedule_list
     
     def save_schedule_for_week(self, week_start: datetime, schedule: Dict[str, List[str]]):
-        """Сохранить расписание на неделю"""
+        """Сохранить расписание на неделю в PostgreSQL, Google Sheets и файлы"""
         week_dates = self.get_week_dates(week_start)
         
-        # Пробуем сохранить в Google Sheets
+        # Сохраняем в PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and save_schedule_to_db:
+            for date, day_name in week_dates:
+                date_str = date.strftime('%Y-%m-%d')
+                employees = schedule.get(day_name, [])
+                employees_str = ', '.join(employees)
+                try:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        asyncio.run_coroutine_threadsafe(
+                            save_schedule_to_db(date_str, day_name, employees_str),
+                            loop
+                        )
+                    except RuntimeError:
+                        asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
+                except Exception as e:
+                    logger.warning(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows_to_save = []
@@ -500,7 +557,7 @@ class ScheduleManager:
                     # Перезаписываем весь лист
                     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_keep, clear_first=True)
             except Exception as e:
-                logger.error(f"Ошибка сохранения расписания недели в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения расписания недели в Google Sheets: {e}")
         
         # Сохраняем в файлы
         for date, day_name in week_dates:
@@ -509,10 +566,13 @@ class ScheduleManager:
             
             employees = schedule.get(day_name, [])
             
-            with open(schedule_file, 'w', encoding='utf-8') as f:
-                f.write(f"{date_str}\n")
-                f.write(f"{day_name}\n")
-                f.write(f"{', '.join(employees)}\n")
+            try:
+                with open(schedule_file, 'w', encoding='utf-8') as f:
+                    f.write(f"{date_str}\n")
+                    f.write(f"{day_name}\n")
+                    f.write(f"{', '.join(employees)}\n")
+            except Exception as e:
+                logger.error(f"Ошибка сохранения расписания {date_str} в файл: {e}")
     
     def update_schedule_for_date(self, date: datetime, employee_name: str, 
                                  action: str, employee_manager):
@@ -560,13 +620,27 @@ class ScheduleManager:
         
         # Сохраняем обновленное расписание
         schedule[day_name] = employees
+        employees_str = ', '.join(employees)
         
-        # Пробуем сохранить в Google Sheets
+        # Сохраняем в PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and save_schedule_to_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_schedule_to_db(date_str, day_name, employees_str),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
+            except Exception as e:
+                logger.warning(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
-                logger.info(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
+                logger.debug(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
                 # Сохраняем только измененный день (как в файле)
-                employees_str = ', '.join(employees)
                 row = [date_str, day_name, employees_str]
                 
                 # Обновляем записи в Google Sheets
@@ -619,7 +693,7 @@ class ScheduleManager:
         return True, free_slots
     
     def add_to_queue(self, date: datetime, employee_name: str, telegram_id: int):
-        """Добавить сотрудника в очередь на дату"""
+        """Добавить сотрудника в очередь на дату (PostgreSQL, Google Sheets, файл)"""
         date_str = date.strftime('%Y-%m-%d')
         
         # Проверяем, не в очереди ли уже
@@ -628,18 +702,35 @@ class ScheduleManager:
             if entry['employee_name'] == employee_name and entry['telegram_id'] == telegram_id:
                 return False  # Уже в очереди
         
-        # Пробуем сохранить в Google Sheets
+        # Сохраняем в PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and add_to_queue_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        add_to_queue_db(date_str, employee_name, telegram_id),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(add_to_queue_db(date_str, employee_name, telegram_id))
+            except Exception as e:
+                logger.warning(f"Ошибка добавления в очередь в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 row = [date_str, employee_name, str(telegram_id)]
                 self.sheets_manager.append_row(SHEET_QUEUE, row)
             except Exception as e:
-                logger.warning(f"Ошибка сохранения в очередь в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения в очередь в Google Sheets: {e}")
         
         # Добавляем в очередь (файл)
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
-        with open(queue_file, 'a', encoding='utf-8') as f:
-            f.write(f"{employee_name}:{telegram_id}\n")
+        try:
+            with open(queue_file, 'a', encoding='utf-8') as f:
+                f.write(f"{employee_name}:{telegram_id}\n")
+        except Exception as e:
+            logger.error(f"Ошибка сохранения в очередь в файл: {e}")
         return True
     
     def get_queue_for_date(self, date: datetime) -> List[Dict]:
@@ -671,7 +762,7 @@ class ScheduleManager:
         return queue
     
     def remove_from_queue(self, date: datetime, employee_name: str, telegram_id: int):
-        """Удалить сотрудника из очереди на дату"""
+        """Удалить сотрудника из очереди на дату (PostgreSQL, Google Sheets, файл)"""
         date_str = date.strftime('%Y-%m-%d')
         
         logger.info(f"Удаление из очереди: {date_str}, сотрудник: {employee_name}, ID: {telegram_id}")
@@ -685,7 +776,21 @@ class ScheduleManager:
         
         logger.info(f"Очередь после удаления: {len(queue)} записей")
         
-        # Пробуем обновить в Google Sheets
+        # Удаляем из PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and remove_from_queue_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        remove_from_queue_db(date_str, telegram_id),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(remove_from_queue_db(date_str, telegram_id))
+            except Exception as e:
+                logger.warning(f"Ошибка удаления из очереди в PostgreSQL: {e}")
+        
+        # Обновляем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 # Удаляем все записи для этой даты и добавляем обновленные
@@ -771,7 +876,7 @@ class ScheduleManager:
     
     def save_request(self, employee_name: str, telegram_id: int, week_start: datetime,
                     days_requested: List[str], days_skipped: List[str]):
-        """Сохранить заявку сотрудника"""
+        """Сохранить заявку сотрудника в PostgreSQL, Google Sheets и файл"""
         week_str = week_start.strftime('%Y-%m-%d')
         
         # Удаляем дубликаты
@@ -781,7 +886,21 @@ class ScheduleManager:
         days_req_str = ','.join(days_requested) if days_requested else ''
         days_skip_str = ','.join(days_skipped) if days_skipped else ''
         
-        # Пробуем сохранить в Google Sheets
+        # Сохраняем в PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and save_request_to_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped))
+            except Exception as e:
+                logger.warning(f"Ошибка сохранения заявки в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 # Проверяем, есть ли заголовок, если нет - добавляем
@@ -797,18 +916,21 @@ class ScheduleManager:
                     if not has_header:
                         header = ['week_start', 'employee_name', 'telegram_id', 'days_requested', 'days_skipped']
                         self.sheets_manager.write_rows(SHEET_REQUESTS, [header], clear_first=True)
-                        logger.info(f"Добавлен заголовок в лист {SHEET_REQUESTS}")
+                        logger.debug(f"Добавлен заголовок в лист {SHEET_REQUESTS}")
                 
                 # Формируем строку для таблицы: [week_start, employee_name, telegram_id, days_requested, days_skipped]
                 row = [week_str, employee_name, str(telegram_id), days_req_str, days_skip_str]
                 self.sheets_manager.append_row(SHEET_REQUESTS, row)
             except Exception as e:
-                logger.warning(f"Ошибка сохранения заявки в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка сохранения заявки в Google Sheets: {e}")
         
         # Сохраняем в файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
-        with open(request_file, 'a', encoding='utf-8') as f:
-            f.write(f"{employee_name}:{telegram_id}:{week_str}:{days_req_str}:{days_skip_str}\n")
+        try:
+            with open(request_file, 'a', encoding='utf-8') as f:
+                f.write(f"{employee_name}:{telegram_id}:{week_str}:{days_req_str}:{days_skip_str}\n")
+        except Exception as e:
+            logger.error(f"Ошибка сохранения заявки в файл: {e}")
     
     def load_requests_for_week(self, week_start: datetime) -> List[Dict]:
         """Загрузить все заявки на неделю (схлопывает дубликаты для одного сотрудника)"""
@@ -866,10 +988,24 @@ class ScheduleManager:
         return list(requests_dict.values())
     
     def clear_requests_for_week(self, week_start: datetime):
-        """Очистить заявки на неделю (после формирования расписания)"""
+        """Очистить заявки на неделю (после формирования расписания) в PostgreSQL, Google Sheets и файл"""
         week_str = week_start.strftime('%Y-%m-%d')
         
-        # Пробуем удалить из Google Sheets
+        # Удаляем из PostgreSQL (приоритет 1)
+        if USE_POSTGRESQL and _pool and clear_requests_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        clear_requests_from_db(week_str),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(clear_requests_from_db(week_str))
+            except Exception as e:
+                logger.warning(f"Ошибка очистки заявок в PostgreSQL: {e}")
+        
+        # Удаляем из Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
@@ -888,12 +1024,15 @@ class ScheduleManager:
                     # Перезаписываем весь лист
                     self.sheets_manager.write_rows(SHEET_REQUESTS, rows_to_keep, clear_first=True)
             except Exception as e:
-                logger.warning(f"Ошибка очистки заявок в Google Sheets: {e}, используем файлы")
+                logger.warning(f"Ошибка очистки заявок в Google Sheets: {e}")
         
         # Удаляем файл
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
         if os.path.exists(request_file):
-            os.remove(request_file)
+            try:
+                os.remove(request_file)
+            except Exception as e:
+                logger.error(f"Ошибка удаления файла заявок: {e}")
     
     def _calculate_employee_days_count(self, default_schedule: Dict[str, Dict[str, str]], employee_name: str) -> int:
         """

@@ -1684,8 +1684,18 @@ async def main():
     # Инициализируем данные при первом запуске
     init_all()
     
-    # Явно загружаем данные из Google Sheets при старте бота
-    logger.info("Загрузка данных из Google Sheets при старте...")
+    # Инициализируем PostgreSQL если доступен
+    from database import init_db, test_connection
+    use_postgresql = await init_db()
+    if use_postgresql:
+        await test_connection()
+        logger.info("✅ PostgreSQL инициализирован и готов к работе")
+    else:
+        logger.info("⚠️ PostgreSQL недоступен, используем Google Sheets")
+    
+    # Явно загружаем данные из Google Sheets при старте бота (если PostgreSQL не используется)
+    if not use_postgresql:
+        logger.info("Загрузка данных из Google Sheets при старте...")
     try:
         # Перезагружаем данные сотрудников
         employee_manager.reload_employees()
@@ -1787,8 +1797,19 @@ if __name__ == "__main__":
     
     try:
         asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Бот остановлен пользователем")
+        # Закрываем подключение к БД при остановке
+        from database import close_db
+        asyncio.run(close_db())
     except Exception as e:
         logger.error(f"❌ Критическая ошибка: {e}", exc_info=True)
         print(f"❌ Критическая ошибка: {e}")
+        # Закрываем подключение к БД при ошибке
+        from database import close_db
+        try:
+            asyncio.run(close_db())
+        except:
+            pass
         raise
 

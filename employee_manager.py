@@ -3,10 +3,11 @@
 """
 import os
 import logging
+import asyncio
 from typing import Dict, Optional, List, Tuple
 from config import (
     EMPLOYEES_FILE, DATA_DIR, PENDING_EMPLOYEES_FILE,
-    USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES
+    USE_GOOGLE_SHEETS, SHEET_EMPLOYEES, SHEET_PENDING_EMPLOYEES, USE_POSTGRESQL
 )
 from utils import get_header_start_idx, filter_empty_rows
 
@@ -21,6 +22,29 @@ if USE_GOOGLE_SHEETS:
         GoogleSheetsManager = None
 else:
     GoogleSheetsManager = None
+
+# Импортируем функции для работы с PostgreSQL
+if USE_POSTGRESQL:
+    try:
+        from database import (
+            load_employees_from_db, save_employee_to_db,
+            load_pending_employees_from_db, save_pending_employee_to_db,
+            remove_pending_employee_from_db, _pool
+        )
+    except ImportError:
+        load_employees_from_db = None
+        save_employee_to_db = None
+        load_pending_employees_from_db = None
+        save_pending_employee_to_db = None
+        remove_pending_employee_from_db = None
+        _pool = None
+else:
+    load_employees_from_db = None
+    save_employee_to_db = None
+    load_pending_employees_from_db = None
+    save_pending_employee_to_db = None
+    remove_pending_employee_from_db = None
+    _pool = None
 
 
 class EmployeeManager:
@@ -48,13 +72,37 @@ class EmployeeManager:
         self._load_pending_employees()
     
     def _load_employees(self):
-        """Загрузить список сотрудников из Google Sheets (приоритет) или файла"""
+        """Загрузить список сотрудников из PostgreSQL (приоритет), Google Sheets или файла"""
         # Очищаем текущие данные
         self.employees = {}
         self.name_to_id = {}
         self.approved_by_admin = {}
         
-        # Пробуем загрузить из Google Sheets, но только если нет буферизованных операций для этого листа
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_employees_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(load_employees_from_db(), loop)
+                    db_employees = future.result(timeout=5)
+                except RuntimeError:
+                    db_employees = asyncio.run(load_employees_from_db())
+                
+                if db_employees:
+                    for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
+                        self.employees[telegram_id] = (manual_name, telegram_name, username)
+                        self.name_to_id[manual_name] = telegram_id
+                        self.approved_by_admin[telegram_id] = approved
+                    logger.info(f"Сотрудники загружены из PostgreSQL: {len(self.employees)} записей")
+                    # Сохраняем в файл для совместимости
+                    self._save_employees_to_file_only()
+                    # Синхронизируем с Google Sheets
+                    self._sync_employees_to_google_sheets()
+                    return
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
         if self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для листа employees
             has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_EMPLOYEES)
@@ -157,34 +205,69 @@ class EmployeeManager:
                     # Если Google Sheets доступен, используем его как источник истины (даже если пуст)
                     if loaded_from_sheets or (rows and len(rows) > start_idx):
                         logger.info(f"Сотрудники загружены из Google Sheets: {len(self.employees)} записей")
+                        # Сохраняем в файл для совместимости
+                        self._save_employees_to_file_only()
+                        # Синхронизируем с PostgreSQL
+                        self._sync_employees_to_postgresql()
                         return
                 except Exception as e:
-                    logger.warning(f"Ошибка загрузки сотрудников из Google Sheets: {e}")
+                    logger.warning(f"Ошибка загрузки сотрудников из Google Sheets: {e}, используем файлы")
             else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_EMPLOYEES}, пропускаем загрузку из Google Sheets")
+                logger.debug(f"Есть буферизованные операции для {SHEET_EMPLOYEES}, используем локальные файлы")
     
-    def _save_employees(self):
-        """Сохранить список сотрудников в файл или Google Sheets"""
-        # Пробуем сохранить в Google Sheets
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                rows = [['manual_name', 'telegram_name', 'telegram_id', 'username']]  # Заголовок
-                for telegram_id in sorted(self.employees.keys()):
-                    manual_name, telegram_name, username = self.employees[telegram_id]
-                    username_str = username if username else ""
-                    rows.append([manual_name, telegram_name, str(telegram_id), username_str])
-                self.sheets_manager.write_rows(SHEET_EMPLOYEES, rows, clear_first=True)
-                return
-            except Exception as e:
-                logger.warning(f"Ошибка сохранения сотрудников в Google Sheets: {e}, используем файлы")
-        
-        # Сохраняем в файл
+    def _save_employees_to_file_only(self):
+        """Сохранить список сотрудников только в файл (без Google Sheets и PostgreSQL)"""
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(EMPLOYEES_FILE, 'w', encoding='utf-8') as f:
             for telegram_id in sorted(self.employees.keys()):
                 manual_name, telegram_name, username = self.employees[telegram_id]
                 username_str = username if username else ""
                 f.write(f"{manual_name}:{telegram_name}:{telegram_id}:{username_str}\n")
+    
+    def _sync_employees_to_postgresql(self):
+        """Синхронизировать сотрудников с PostgreSQL"""
+        if not USE_POSTGRESQL or not _pool or not save_employee_to_db:
+            return
+        
+        for telegram_id, (manual_name, telegram_name, username) in self.employees.items():
+            approved = self.approved_by_admin.get(telegram_id, False)
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved))
+            except Exception as e:
+                logger.warning(f"Ошибка синхронизации сотрудника {telegram_id} с PostgreSQL: {e}")
+    
+    def _sync_employees_to_google_sheets(self):
+        """Синхронизировать сотрудников с Google Sheets"""
+        if not self.sheets_manager or not self.sheets_manager.is_available():
+            return
+        
+        try:
+            rows = [['manual_name', 'telegram_name', 'telegram_id', 'username']]  # Заголовок
+            for telegram_id in sorted(self.employees.keys()):
+                manual_name, telegram_name, username = self.employees[telegram_id]
+                username_str = username if username else ""
+                rows.append([manual_name, telegram_name, str(telegram_id), username_str])
+            self.sheets_manager.write_rows(SHEET_EMPLOYEES, rows, clear_first=True)
+        except Exception as e:
+            logger.warning(f"Ошибка синхронизации сотрудников с Google Sheets: {e}")
+    
+    def _save_employees(self):
+        """Сохранить список сотрудников в PostgreSQL, Google Sheets и файл"""
+        # Сохраняем в файл
+        self._save_employees_to_file_only()
+        
+        # Сохраняем в PostgreSQL (приоритет 1)
+        self._sync_employees_to_postgresql()
+        
+        # Сохраняем в Google Sheets (приоритет 2)
+        self._sync_employees_to_google_sheets()
     
     def add_employee(self, name: str, telegram_id: int, telegram_name: Optional[str] = None, username: Optional[str] = None) -> bool:
         """Добавить сотрудника"""
@@ -211,6 +294,22 @@ class EmployeeManager:
         self.name_to_id[name] = telegram_id
         # Помечаем как одобренного админом
         self.approved_by_admin[telegram_id] = True
+        
+        # Сохраняем в PostgreSQL
+        if USE_POSTGRESQL and _pool and save_employee_to_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_employee_to_db(telegram_id, name, telegram_name, username, True),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_employee_to_db(telegram_id, name, telegram_name, username, True))
+            except Exception as e:
+                logger.warning(f"Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets и файл
         self._save_employees()
         return True
     
@@ -241,12 +340,60 @@ class EmployeeManager:
         self._load_pending_employees()
     
     def _load_pending_employees(self):
-        """Загрузить отложенные записи сотрудников (username -> manual_name) из Google Sheets (приоритет) или файла"""
+        """Загрузить отложенные записи сотрудников из PostgreSQL (приоритет), Google Sheets или файла"""
         # Очищаем текущие данные
         self.pending_employees = {}
         
-        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
-        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_pending_employees_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(load_pending_employees_from_db(), loop)
+                    db_pending = future.result(timeout=5)
+                except RuntimeError:
+                    db_pending = asyncio.run(load_pending_employees_from_db())
+                
+                if db_pending:
+                    self.pending_employees = db_pending
+                    logger.info(f"Отложенные сотрудники загружены из PostgreSQL: {len(self.pending_employees)} записей")
+                    # Сохраняем в файл для совместимости
+                    self._save_pending_employees_to_file_only()
+                    # Синхронизируем с Google Sheets
+                    self._sync_pending_employees_to_google_sheets()
+                    return
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['username', 'manual_name'])
+                
+                for row in rows[start_idx:]:
+                    if not row or len(row) < 2:
+                        continue
+                    try:
+                        username = row[0].strip().lower() if row[0] else None
+                        manual_name = row[1].strip() if len(row) > 1 and row[1] else None
+                        if username and manual_name:
+                            self.pending_employees[username] = manual_name
+                    except Exception:
+                        continue
+                
+                if self.pending_employees:
+                    logger.info(f"Отложенные сотрудники загружены из Google Sheets: {len(self.pending_employees)} записей")
+                    # Сохраняем в файл для совместимости
+                    self._save_pending_employees_to_file_only()
+                    # Синхронизируем с PostgreSQL
+                    self._sync_pending_employees_to_postgresql()
+                    return
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки отложенных сотрудников из Google Sheets: {e}")
+        
+        # ПРИОРИТЕТ 3: Локальные файлы
         if not os.path.exists(PENDING_EMPLOYEES_FILE):
             return
         
@@ -263,25 +410,59 @@ class EmployeeManager:
                         self.pending_employees[username] = manual_name
         except Exception as e:
             logger.error(f"Ошибка загрузки отложенных записей: {e}")
-    
-    def _save_pending_employees(self):
-        """Сохранить отложенные записи сотрудников"""
-        # Пробуем сохранить в Google Sheets
-        if self.sheets_manager and self.sheets_manager.is_available():
-            try:
-                rows = [['username', 'manual_name']]  # Заголовок
-                for username, manual_name in sorted(self.pending_employees.items()):
-                    rows.append([username, manual_name])
-                self.sheets_manager.write_rows(SHEET_PENDING_EMPLOYEES, rows, clear_first=True)
-                return
-            except Exception as e:
-                logger.warning(f"Ошибка сохранения отложенных записей в Google Sheets: {e}, используем файлы")
         
-        # Сохраняем в файл
+        # Синхронизируем с PostgreSQL (если загрузились из файла)
+        if self.pending_employees:
+            self._sync_pending_employees_to_postgresql()
+    
+    def _save_pending_employees_to_file_only(self):
+        """Сохранить отложенные записи сотрудников только в файл"""
         os.makedirs(DATA_DIR, exist_ok=True)
         with open(PENDING_EMPLOYEES_FILE, 'w', encoding='utf-8') as f:
             for username, manual_name in sorted(self.pending_employees.items()):
                 f.write(f"{username}:{manual_name}\n")
+    
+    def _sync_pending_employees_to_postgresql(self):
+        """Синхронизировать отложенных сотрудников с PostgreSQL"""
+        if not USE_POSTGRESQL or not _pool or not save_pending_employee_to_db:
+            return
+        
+        for username, manual_name in self.pending_employees.items():
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_pending_employee_to_db(username, manual_name),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_pending_employee_to_db(username, manual_name))
+            except Exception as e:
+                logger.warning(f"Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {e}")
+    
+    def _sync_pending_employees_to_google_sheets(self):
+        """Синхронизировать отложенных сотрудников с Google Sheets"""
+        if not self.sheets_manager or not self.sheets_manager.is_available():
+            return
+        
+        try:
+            rows = [['username', 'manual_name']]  # Заголовок
+            for username, manual_name in sorted(self.pending_employees.items()):
+                rows.append([username, manual_name])
+            self.sheets_manager.write_rows(SHEET_PENDING_EMPLOYEES, rows, clear_first=True)
+        except Exception as e:
+            logger.warning(f"Ошибка синхронизации отложенных сотрудников с Google Sheets: {e}")
+    
+    def _save_pending_employees(self):
+        """Сохранить отложенные записи сотрудников в PostgreSQL, Google Sheets и файл"""
+        # Сохраняем в файл
+        self._save_pending_employees_to_file_only()
+        
+        # Сохраняем в PostgreSQL (приоритет 1)
+        self._sync_pending_employees_to_postgresql()
+        
+        # Сохраняем в Google Sheets (приоритет 2)
+        self._sync_pending_employees_to_google_sheets()
     
     def add_pending_employee(self, username: str, manual_name: str) -> tuple[bool, Optional[str]]:
         """
@@ -296,6 +477,22 @@ class EmployeeManager:
         was_existing = username_lower in self.pending_employees
         old_name = self.pending_employees.get(username_lower) if was_existing else None
         self.pending_employees[username_lower] = manual_name
+        
+        # Сохраняем в PostgreSQL
+        if USE_POSTGRESQL and _pool and save_pending_employee_to_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_pending_employee_to_db(username_lower, manual_name),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_pending_employee_to_db(username_lower, manual_name))
+            except Exception as e:
+                logger.warning(f"Ошибка сохранения отложенного сотрудника {username_lower} в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets и файл
         self._save_pending_employees()
         return (was_existing, old_name)
     
@@ -309,6 +506,22 @@ class EmployeeManager:
         username_lower = username.lower().lstrip('@')
         if username_lower in self.pending_employees:
             del self.pending_employees[username_lower]
+            
+            # Удаляем из PostgreSQL
+            if USE_POSTGRESQL and _pool and remove_pending_employee_from_db:
+                try:
+                    try:
+                        loop = asyncio.get_running_loop()
+                        asyncio.run_coroutine_threadsafe(
+                            remove_pending_employee_from_db(username_lower),
+                            loop
+                        )
+                    except RuntimeError:
+                        asyncio.run(remove_pending_employee_from_db(username_lower))
+                except Exception as e:
+                    logger.warning(f"Ошибка удаления отложенного сотрудника {username_lower} из PostgreSQL: {e}")
+            
+            # Сохраняем в Google Sheets и файл
             self._save_pending_employees()
     
     def register_user(self, telegram_id: int, telegram_name: str, username: Optional[str] = None) -> tuple[bool, bool]:
@@ -325,6 +538,23 @@ class EmployeeManager:
             updated = False
             if telegram_name != old_telegram_name or (username and username != old_username):
                 self.employees[telegram_id] = (manual_name, telegram_name, username or old_username)
+                
+                # Сохраняем в PostgreSQL
+                if USE_POSTGRESQL and _pool and save_employee_to_db:
+                    approved = self.approved_by_admin.get(telegram_id, True)
+                    try:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            asyncio.run_coroutine_threadsafe(
+                                save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved),
+                                loop
+                            )
+                        except RuntimeError:
+                            asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved))
+                    except Exception as e:
+                        logger.warning(f"Ошибка обновления сотрудника {telegram_id} в PostgreSQL: {e}")
+                
+                # Сохраняем в Google Sheets и файл
                 self._save_employees()
                 updated = True
             # Если пользователь уже был в системе, считаем что был добавлен админом
@@ -347,6 +577,22 @@ class EmployeeManager:
         self.name_to_id[manual_name] = telegram_id
         # Сохраняем флаг одобрения админом
         self.approved_by_admin[telegram_id] = was_added_by_admin
+        
+        # Сохраняем в PostgreSQL
+        if USE_POSTGRESQL and _pool and save_employee_to_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.run_coroutine_threadsafe(
+                        save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin),
+                        loop
+                    )
+                except RuntimeError:
+                    asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin))
+            except Exception as e:
+                logger.warning(f"Ошибка сохранения сотрудника {telegram_id} в PostgreSQL: {e}")
+        
+        # Сохраняем в Google Sheets и файл
         self._save_employees()
         return (True, was_added_by_admin)
     

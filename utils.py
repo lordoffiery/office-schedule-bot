@@ -4,7 +4,12 @@
 import logging
 from typing import List, Tuple, Optional, Callable, Any
 from functools import wraps
-from aiogram.types import Message
+
+# Опциональный импорт aiogram (нужен только для декораторов)
+try:
+    from aiogram.types import Message
+except ImportError:
+    Message = None  # Для тестирования без aiogram
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +92,9 @@ def check_user_registered_and_approved(employee_manager) -> Callable:
     Returns:
         Декоратор функции
     """
+    if Message is None:
+        raise ImportError("aiogram не установлен, декоратор недоступен")
+    
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(message: Message, *args, **kwargs):
@@ -136,6 +144,9 @@ def check_admin(func: Callable) -> Callable:
     Returns:
         Обернутая функция
     """
+    if Message is None:
+        raise ImportError("aiogram не установлен, декоратор недоступен")
+    
     @wraps(func)
     async def wrapper(message: Message, *args, **kwargs):
         from main import admin_manager, get_user_info, log_command

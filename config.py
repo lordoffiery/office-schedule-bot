@@ -34,8 +34,13 @@ ADMINS_FILE = f'{DATA_DIR}/admins.txt'
 DEFAULT_SCHEDULE_FILE = f'{DATA_DIR}/default_schedule.txt'
 PENDING_EMPLOYEES_FILE = f'{DATA_DIR}/pending_employees.txt'
 
-# Google Sheets настройки (опционально)
-USE_GOOGLE_SHEETS = os.getenv('USE_GOOGLE_SHEETS', 'true').lower() == 'true'  # По умолчанию включено
+# PostgreSQL настройки
+DATABASE_URL = os.getenv('DATABASE_URL') or os.getenv('DATABASE_PUBLIC_URL')
+USE_POSTGRESQL = DATABASE_URL is not None  # Автоматически определяется наличием DATABASE_URL
+
+# Google Sheets настройки (опционально, используется одновременно с PostgreSQL для синхронизации)
+# Во время миграции оба хранилища работают одновременно
+USE_GOOGLE_SHEETS = os.getenv('USE_GOOGLE_SHEETS', 'true').lower() == 'true'
 GOOGLE_SHEETS_ID = os.getenv('GOOGLE_SHEETS_ID', '13zmdoS160B5Hn0Cl-q2hNrEgyZVc6Jh0JaxUnI9jSFg')  # ID из URL
 GOOGLE_SHEETS_CREDENTIALS = os.getenv('GOOGLE_SHEETS_CREDENTIALS', '')
 GOOGLE_CREDENTIALS_FILE = os.getenv('GOOGLE_CREDENTIALS_FILE', 'google_credentials.json')
