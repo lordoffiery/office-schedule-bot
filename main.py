@@ -4,8 +4,10 @@
 import asyncio
 import os
 import logging
+import threading
 from datetime import datetime, timedelta
 from typing import Optional
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -36,6 +38,32 @@ schedule_manager = ScheduleManager(employee_manager)
 notification_manager = NotificationManager(bot, schedule_manager, employee_manager, admin_manager)
 
 timezone = pytz.timezone(TIMEZONE)
+
+
+# Простой HTTP-сервер для health check
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health' or self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/plain')
+            self.end_headers()
+            self.wfile.write(b'OK')
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def log_message(self, format, *args):
+        # Отключаем логирование HTTP-запросов
+        pass
+
+def start_health_server():
+    """Запустить простой HTTP-сервер для health check на порту 8080"""
+    try:
+        server = HTTPServer(('0.0.0.0', 8080), HealthCheckHandler)
+        logger.info("Health check server started on port 8080")
+        server.serve_forever()
+    except Exception as e:
+        logger.warning(f"Не удалось запустить health check server: {e}")
 
 
 # Вспомогательная функция для логирования команд
@@ -1692,6 +1720,11 @@ async def main():
         employee_manager.sheets_manager.start_buffer_flusher()
     if admin_manager.sheets_manager:
         admin_manager.sheets_manager.start_buffer_flusher()
+    
+    # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    logger.info("Health check server thread started")
     
     # Удаляем вебхук и запускаем polling
     try:
