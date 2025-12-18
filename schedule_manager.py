@@ -35,7 +35,8 @@ if USE_POSTGRESQL:
         from database import (
             save_schedule_to_db, save_default_schedule_to_db, save_request_to_db,
             clear_requests_from_db, add_to_queue_db, remove_from_queue_db,
-            _pool
+            load_schedule_from_db, load_default_schedule_from_db,
+            load_requests_from_db, load_queue_from_db, _pool
         )
     except ImportError:
         save_schedule_to_db = None
@@ -44,6 +45,10 @@ if USE_POSTGRESQL:
         clear_requests_from_db = None
         add_to_queue_db = None
         remove_from_queue_db = None
+        load_schedule_from_db = None
+        load_default_schedule_from_db = None
+        load_requests_from_db = None
+        load_queue_from_db = None
         _pool = None
 else:
     save_schedule_to_db = None
@@ -52,6 +57,10 @@ else:
     clear_requests_from_db = None
     add_to_queue_db = None
     remove_from_queue_db = None
+    load_schedule_from_db = None
+    load_default_schedule_from_db = None
+    load_requests_from_db = None
+    load_queue_from_db = None
     _pool = None
 
 
@@ -95,14 +104,29 @@ class ScheduleManager:
     
     def load_default_schedule(self) -> Dict[str, Dict[str, str]]:
         """
-        Загрузить расписание по умолчанию в формате JSON (день -> {подразделение.место: имя})
-        
-        Returns:
-            Dict[str, Dict[str, str]]: Расписание по дням, где внутренний словарь - места (ключ: "подразделение.место")
+        Загрузить расписание по умолчанию из PostgreSQL (приоритет), Google Sheets или файла
+        Returns: Dict[str, Dict[str, str]] - {день: {место: имя}}
         """
         schedule = {}
         
-        # Пробуем загрузить из Google Sheets
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_default_schedule_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(load_default_schedule_from_db(), loop)
+                    db_schedule = future.result(timeout=5)
+                except RuntimeError:
+                    db_schedule = asyncio.run(load_default_schedule_from_db())
+                
+                if db_schedule:
+                    schedule = db_schedule
+                    logger.info(f"Расписание по умолчанию загружено из PostgreSQL: {len(schedule)} дней")
+                    return schedule
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
@@ -370,7 +394,7 @@ class ScheduleManager:
     def has_saved_schedules_for_week(self, week_start: datetime) -> bool:
         """
         Проверить, есть ли сохраненные расписания для недели
-        (проверяет и локальные файлы, и Google Sheets)
+        (проверяет PostgreSQL, локальные файлы и Google Sheets)
         
         Args:
             week_start: Начало недели
@@ -379,15 +403,36 @@ class ScheduleManager:
             True если есть сохраненные расписания, False иначе
         """
         week_dates = self.get_week_dates(week_start)
+        week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
         
-        # Сначала проверяем локальные файлы
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_schedule_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    for date_str in week_dates_str:
+                        future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
+                        db_schedule = future.result(timeout=2)
+                        if db_schedule:
+                            logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
+                            return True
+                except RuntimeError:
+                    for date_str in week_dates_str:
+                        db_schedule = asyncio.run(load_schedule_from_db(date_str))
+                        if db_schedule:
+                            logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
+                            return True
+            except Exception as e:
+                logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Локальные файлы
         for d, day_name in week_dates:
             date_str = d.strftime('%Y-%m-%d')
             schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
             if os.path.exists(schedule_file):
                 return True
         
-        # Если локальных файлов нет, проверяем Google Sheets
+        # ПРИОРИТЕТ 3: Google Sheets
         # ВАЖНО: Проверяем наличие буферизованных операций - если есть, не проверяем Google Sheets
         # чтобы не перезаписать актуальные данные из локальных файлов
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -403,7 +448,6 @@ class ScheduleManager:
                     return False
                     
                 start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
-                week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
                 for row in rows[start_idx:]:
                     if len(row) >= 1 and row[0] and row[0].strip() in week_dates_str:
                         logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в Google Sheets")
@@ -418,8 +462,40 @@ class ScheduleManager:
         date_str = date.strftime('%Y-%m-%d')
         schedule = {}
         
-        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
-        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_schedule_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
+                    db_schedule = future.result(timeout=5)
+                except RuntimeError:
+                    db_schedule = asyncio.run(load_schedule_from_db(date_str))
+                
+                if db_schedule:
+                    # db_schedule имеет формат {day_name: employees_str}
+                    for day_name, employees_str in db_schedule.items():
+                        employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                        # Форматируем имена, если нужно
+                        if employee_manager:
+                            formatted_employees = []
+                            for emp in employees:
+                                # Проверяем, отформатировано ли уже имя
+                                if '(@' in emp and emp.endswith(')'):
+                                    formatted_employees.append(emp)
+                                else:
+                                    formatted_employees.append(employee_manager.format_employee_name(emp))
+                            schedule[day_name] = formatted_employees
+                        else:
+                            schedule[day_name] = employees
+                    
+                    if schedule:
+                        logger.debug(f"Загружено расписание для {date_str} из PostgreSQL")
+                        return schedule
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в PostgreSQL/Google Sheets)
         schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
         if os.path.exists(schedule_file):
             try:
@@ -452,7 +528,7 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"Ошибка загрузки расписания на {date_str}: {e}")
         
-        # Если локального файла нет, пытаемся загрузить из Google Sheets
+        # ПРИОРИТЕТ 3: Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
             # Проверяем, есть ли буферизованные операции для schedules
             # Если есть, приоритет отдаем локальным файлам (которые мы уже проверили выше)
@@ -734,12 +810,28 @@ class ScheduleManager:
         return True
     
     def get_queue_for_date(self, date: datetime) -> List[Dict]:
-        """Получить очередь на дату"""
+        """Получить очередь на дату из PostgreSQL (приоритет), Google Sheets или файла"""
         date_str = date.strftime('%Y-%m-%d')
         queue = []
         
-        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
-        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_queue_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(load_queue_from_db(date_str), loop)
+                    db_queue = future.result(timeout=5)
+                except RuntimeError:
+                    db_queue = asyncio.run(load_queue_from_db(date_str))
+                
+                if db_queue:
+                    queue = db_queue
+                    logger.debug(f"Очередь для {date_str} загружена из PostgreSQL: {len(queue)} записей")
+                    return queue
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки очереди из PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Локальные файлы
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
         if os.path.exists(queue_file):
             try:
@@ -758,6 +850,28 @@ class ScheduleManager:
                             })
             except Exception as e:
                 logger.error(f"Ошибка загрузки очереди: {e}")
+        
+        # ПРИОРИТЕТ 3: Google Sheets (если локальных файлов нет)
+        if not queue and self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_QUEUE)
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+                
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[0] and row[0].strip() == date_str:
+                        try:
+                            employee_name = row[1].strip() if len(row) > 1 and row[1] else None
+                            telegram_id = int(row[2].strip()) if len(row) > 2 and row[2] else None
+                            if employee_name and telegram_id:
+                                queue.append({
+                                    'employee_name': employee_name,
+                                    'telegram_id': telegram_id
+                                })
+                        except (ValueError, IndexError):
+                            continue
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки очереди из Google Sheets: {e}")
         
         return queue
     
@@ -933,57 +1047,128 @@ class ScheduleManager:
             logger.error(f"Ошибка сохранения заявки в файл: {e}")
     
     def load_requests_for_week(self, week_start: datetime) -> List[Dict]:
-        """Загрузить все заявки на неделю (схлопывает дубликаты для одного сотрудника)"""
+        """Загрузить все заявки на неделю из PostgreSQL (приоритет), Google Sheets или файла (схлопывает дубликаты)"""
         week_str = week_start.strftime('%Y-%m-%d')
         requests_dict = {}  # Ключ: (employee_name, telegram_id), значение: заявка
         
-        # ВАЖНО: Сначала проверяем локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в Google Sheets)
-        # Это особенно важно после перезапуска, когда буфер в памяти пуст, но локальные файлы могут содержать актуальные данные
-        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
-        if not os.path.exists(request_file):
-            return []
-        
-        try:
-            with open(request_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    parts = line.split(':')
-                    if len(parts) >= 5:
-                        employee_name = parts[0]
-                        telegram_id = int(parts[1])
-                        week_start_str = parts[2]
-                        days_requested = [d for d in parts[3].split(',') if d]
-                        days_skipped = [d for d in parts[4].split(',') if d]
-                        
-                        key = (employee_name, telegram_id)
-                        
+        # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
+        if USE_POSTGRESQL and _pool and load_requests_from_db:
+            try:
+                try:
+                    loop = asyncio.get_running_loop()
+                    future = asyncio.run_coroutine_threadsafe(load_requests_from_db(week_str), loop)
+                    db_requests = future.result(timeout=5)
+                except RuntimeError:
+                    db_requests = asyncio.run(load_requests_from_db(week_str))
+                
+                if db_requests:
+                    for req in db_requests:
+                        key = (req['employee_name'], req['telegram_id'])
                         # Если уже есть заявка для этого сотрудника, объединяем
                         if key in requests_dict:
                             existing = requests_dict[key]
-                            # Объединяем запрошенные дни (убираем дубликаты)
-                            combined_requested = list(dict.fromkeys(existing['days_requested'] + days_requested))
-                            # Объединяем пропущенные дни (убираем дубликаты)
-                            combined_skipped = list(dict.fromkeys(existing['days_skipped'] + days_skipped))
-                            # Удаляем из запрошенных те дни, которые есть в пропущенных
+                            combined_requested = list(dict.fromkeys(existing['days_requested'] + req['days_requested']))
+                            combined_skipped = list(dict.fromkeys(existing['days_skipped'] + req['days_skipped']))
                             combined_requested = [d for d in combined_requested if d not in combined_skipped]
-                            
                             requests_dict[key] = {
-                                'employee_name': employee_name,
-                                'telegram_id': telegram_id,
+                                'employee_name': req['employee_name'],
+                                'telegram_id': req['telegram_id'],
                                 'days_requested': combined_requested,
                                 'days_skipped': combined_skipped
                             }
                         else:
-                            requests_dict[key] = {
-                                'employee_name': employee_name,
-                                'telegram_id': telegram_id,
-                                'days_requested': days_requested,
-                                'days_skipped': days_skipped
-                            }
-        except Exception as e:
-            logger.error(f"Ошибка загрузки заявок: {e}")
+                            requests_dict[key] = req
+                    
+                    if requests_dict:
+                        logger.debug(f"Заявки для недели {week_str} загружены из PostgreSQL: {len(requests_dict)} записей")
+                        return list(requests_dict.values())
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {e}")
+        
+        # ПРИОРИТЕТ 2: Локальные файлы
+        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
+        if os.path.exists(request_file):
+            try:
+                with open(request_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        parts = line.split(':')
+                        if len(parts) >= 5:
+                            employee_name = parts[0]
+                            telegram_id = int(parts[1])
+                            week_start_str = parts[2]
+                            days_requested = [d for d in parts[3].split(',') if d]
+                            days_skipped = [d for d in parts[4].split(',') if d]
+                            
+                            key = (employee_name, telegram_id)
+                            
+                            # Если уже есть заявка для этого сотрудника, объединяем
+                            if key in requests_dict:
+                                existing = requests_dict[key]
+                                combined_requested = list(dict.fromkeys(existing['days_requested'] + days_requested))
+                                combined_skipped = list(dict.fromkeys(existing['days_skipped'] + days_skipped))
+                                combined_requested = [d for d in combined_requested if d not in combined_skipped]
+                                
+                                requests_dict[key] = {
+                                    'employee_name': employee_name,
+                                    'telegram_id': telegram_id,
+                                    'days_requested': combined_requested,
+                                    'days_skipped': combined_skipped
+                                }
+                            else:
+                                requests_dict[key] = {
+                                    'employee_name': employee_name,
+                                    'telegram_id': telegram_id,
+                                    'days_requested': days_requested,
+                                    'days_skipped': days_skipped
+                                }
+            except Exception as e:
+                logger.error(f"Ошибка загрузки заявок: {e}")
+        
+        # ПРИОРИТЕТ 3: Google Sheets (если локальных файлов нет)
+        if not requests_dict and self.sheets_manager and self.sheets_manager.is_available():
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['week_start', 'week', 'Неделя', 'employee_name'])
+                
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[0] and row[0].strip() == week_str:
+                        try:
+                            employee_name = row[1].strip() if len(row) > 1 and row[1] else None
+                            telegram_id = int(row[2].strip()) if len(row) > 2 and row[2] else None
+                            days_requested_str = row[3].strip() if len(row) > 3 and row[3] else None
+                            days_skipped_str = row[4].strip() if len(row) > 4 and row[4] else None
+                            
+                            if employee_name and telegram_id:
+                                days_requested = [d.strip() for d in days_requested_str.split(',')] if days_requested_str else []
+                                days_skipped = [d.strip() for d in days_skipped_str.split(',')] if days_skipped_str else []
+                                
+                                key = (employee_name, telegram_id)
+                                if key in requests_dict:
+                                    existing = requests_dict[key]
+                                    combined_requested = list(dict.fromkeys(existing['days_requested'] + days_requested))
+                                    combined_skipped = list(dict.fromkeys(existing['days_skipped'] + days_skipped))
+                                    combined_requested = [d for d in combined_requested if d not in combined_skipped]
+                                    requests_dict[key] = {
+                                        'employee_name': employee_name,
+                                        'telegram_id': telegram_id,
+                                        'days_requested': combined_requested,
+                                        'days_skipped': combined_skipped
+                                    }
+                                else:
+                                    requests_dict[key] = {
+                                        'employee_name': employee_name,
+                                        'telegram_id': telegram_id,
+                                        'days_requested': days_requested,
+                                        'days_skipped': days_skipped
+                                    }
+                        except (ValueError, IndexError):
+                            continue
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки заявок из Google Sheets: {e}")
         
         return list(requests_dict.values())
     
