@@ -81,10 +81,13 @@ class AdminManager:
                     loop = asyncio.get_running_loop()
                     # Loop уже запущен, используем run_coroutine_threadsafe
                     future = asyncio.run_coroutine_threadsafe(load_admins_from_db(), loop)
-                    db_admins = future.result(timeout=5)
+                    db_admins = future.result(timeout=10)
                 except RuntimeError:
                     # Loop не запущен, используем asyncio.run
                     db_admins = asyncio.run(load_admins_from_db())
+                except Exception as e:
+                    logger.warning(f"Ошибка при выполнении load_admins_from_db: {type(e).__name__}: {e}", exc_info=True)
+                    db_admins = None
                 
                 if db_admins:
                     self.admins = db_admins
@@ -95,7 +98,7 @@ class AdminManager:
                     self._sync_to_google_sheets()
                     return
             except Exception as e:
-                logger.warning(f"Ошибка загрузки администраторов из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки администраторов из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -182,14 +185,16 @@ class AdminManager:
                 loop = asyncio.get_running_loop()
                 # Если loop запущен, используем run_coroutine_threadsafe
                 future = asyncio.run_coroutine_threadsafe(save_admins_to_db(self.admins), loop)
-                future.result(timeout=5)  # Ждем результат
+                future.result(timeout=10)  # Ждем результат
                 logger.debug(f"Администраторы синхронизированы с PostgreSQL: {len(self.admins)} записей")
             except RuntimeError:
                 # Loop не запущен, используем asyncio.run
                 asyncio.run(save_admins_to_db(self.admins))
                 logger.debug(f"Администраторы синхронизированы с PostgreSQL: {len(self.admins)} записей")
+            except Exception as e:
+                logger.warning(f"Ошибка при выполнении save_admins_to_db: {type(e).__name__}: {e}", exc_info=True)
         except Exception as e:
-            logger.warning(f"Ошибка синхронизации с PostgreSQL: {e}")
+            logger.warning(f"Ошибка синхронизации с PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
     
     def _sync_to_google_sheets(self):
         """Синхронизировать администраторов с Google Sheets"""

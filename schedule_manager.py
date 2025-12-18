@@ -125,7 +125,7 @@ class ScheduleManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(load_default_schedule_from_db(), loop)
-                    db_schedule = future.result(timeout=5)
+                    db_schedule = future.result(timeout=10)
                 except RuntimeError:
                     db_schedule = asyncio.run(load_default_schedule_from_db())
                 
@@ -263,7 +263,7 @@ class ScheduleManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(save_default_schedule_to_db(schedule), loop)
-                    result = future.result(timeout=5)  # Ждем результат
+                    result = future.result(timeout=10)  # Ждем результат
                     if result:
                         logger.info("✅ Расписание по умолчанию сохранено в PostgreSQL")
                     else:
@@ -443,7 +443,7 @@ class ScheduleManager:
                             logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
                             return True
             except Exception as e:
-                logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {e}")
+                logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         for d, day_name in week_dates:
@@ -489,7 +489,7 @@ class ScheduleManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
-                    db_schedule = future.result(timeout=5)
+                    db_schedule = future.result(timeout=10)
                 except RuntimeError:
                     db_schedule = asyncio.run(load_schedule_from_db(date_str))
                 
@@ -514,7 +514,7 @@ class ScheduleManager:
                         logger.debug(f"Загружено расписание для {date_str} из PostgreSQL")
                         return schedule
             except Exception as e:
-                logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в PostgreSQL/Google Sheets)
         schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
@@ -618,7 +618,7 @@ class ScheduleManager:
                             save_schedule_to_db(date_str, day_name, employees_str),
                             loop
                         )
-                        future.result(timeout=5)  # Ждем результат
+                        future.result(timeout=10)  # Ждем результат
                     except RuntimeError:
                         asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
                 except Exception as e:
@@ -736,7 +736,7 @@ class ScheduleManager:
                         loop
                     )
                     logger.info(f"   Ожидаю результат (timeout=5)...")
-                    result = future.result(timeout=5)  # Ждем результат
+                    result = future.result(timeout=10)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
@@ -839,7 +839,7 @@ class ScheduleManager:
                         loop
                     )
                     logger.info(f"   Ожидаю результат (timeout=5)...")
-                    result = future.result(timeout=5)  # Ждем результат
+                    result = future.result(timeout=10)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
@@ -897,7 +897,7 @@ class ScheduleManager:
                     logger.debug(f"Очередь для {date_str} загружена из PostgreSQL: {len(queue)} записей")
                     return queue
             except Exception as e:
-                logger.warning(f"Ошибка загрузки очереди из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки очереди из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         queue_file = os.path.join(QUEUE_DIR, f"{date_str}_queue.txt")
@@ -968,7 +968,7 @@ class ScheduleManager:
                         remove_from_queue_db(date_str, telegram_id),
                         loop
                     )
-                    result = future.result(timeout=5)  # Ждем результат
+                    result = future.result(timeout=10)  # Ждем результат
                     if result:
                         logger.info(f"✅ Удалено из очереди PostgreSQL: {employee_name} на {date_str}")
                     else:
@@ -1093,7 +1093,7 @@ class ScheduleManager:
                         loop
                     )
                     logger.info(f"   Ожидаю результат (timeout=5)...")
-                    result = future.result(timeout=5)  # Ждем результат
+                    result = future.result(timeout=10)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
@@ -1185,7 +1185,7 @@ class ScheduleManager:
                         logger.debug(f"Заявки для недели {week_str} загружены из PostgreSQL: {len(requests_dict)} записей")
                         return list(requests_dict.values())
             except Exception as e:
-                logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
@@ -1291,7 +1291,7 @@ class ScheduleManager:
                 except RuntimeError:
                     asyncio.run(clear_requests_from_db(week_str))
             except Exception as e:
-                logger.warning(f"Ошибка очистки заявок в PostgreSQL: {e}")
+                logger.warning(f"Ошибка очистки заявок в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # Удаляем из Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
