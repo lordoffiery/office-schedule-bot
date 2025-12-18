@@ -1773,7 +1773,7 @@ async def main():
     init_all()
     
     # Инициализируем PostgreSQL если доступен
-    from database import init_db, test_connection, save_schedule_to_db, load_schedule_from_db
+    from database import init_db, test_connection
     logger.info("🔧 Начинаю инициализацию PostgreSQL...")
     use_postgresql = await init_db()
     logger.info(f"   init_db() вернул: {use_postgresql}")

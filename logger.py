@@ -103,9 +103,6 @@ def log_command(user_id: int, username: str, first_name: str, command: str, resp
             logger.warning(f"Ошибка записи лога в PostgreSQL: {e}")
             # Добавляем в буфер для повторной попытки
             _log_buffer.append(('postgresql', row))
-    
-    # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-    # if USE_GOOGLE_SHEETS_FOR_WRITES and sheets_manager and sheets_manager.is_available():
     #     try:
     #         # Используем PRIORITY_LOW для логов - они будут пропущены при превышении лимита API
     #         from google_sheets_manager import PRIORITY_LOW

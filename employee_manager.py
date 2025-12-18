@@ -272,9 +272,6 @@ class EmployeeManager:
         
         # Сохраняем в PostgreSQL (приоритет 1)
         self._sync_employees_to_postgresql()
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES:
         #     self._sync_employees_to_google_sheets()
     
     def add_employee(self, name: str, telegram_id: int, telegram_name: Optional[str] = None, username: Optional[str] = None) -> bool:
@@ -457,9 +454,6 @@ class EmployeeManager:
         
         # Сохраняем в PostgreSQL (приоритет 1)
         self._sync_pending_employees_to_postgresql()
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES:
         #     self._sync_pending_employees_to_google_sheets()
     
     def add_pending_employee(self, username: str, manual_name: str) -> tuple[bool, Optional[str]]:

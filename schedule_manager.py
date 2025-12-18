@@ -267,22 +267,6 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}", exc_info=True)
         
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
-        #     try:
-        #         rows_to_save = [['day_name', 'places_json']]  # Заголовок
-        #         for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-        #             places_dict = schedule.get(day_name, {})
-        #             # Сохраняем как JSON строку
-        #             places_json = json.dumps(places_dict, ensure_ascii=False)
-        #             rows_to_save.append([day_name, places_json])
-        #         
-        #         # Перезаписываем весь лист
-        #         self.sheets_manager.write_rows(SHEET_DEFAULT_SCHEDULE, rows_to_save, clear_first=True)
-        #         logger.debug(f"Расписание по умолчанию сохранено в Google Sheets")
-        #     except Exception as e:
-        #         logger.warning(f"Ошибка сохранения расписания по умолчанию в Google Sheets: {e}")
-        
         # Сохраняем в файл как JSON
         try:
             with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
@@ -596,9 +580,6 @@ class ScheduleManager:
                     save_schedule_to_db_sync(date_str, day_name, employees_str)
                 except Exception as e:
                     logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         rows_to_save = []
         #         for date, day_name in week_dates:
@@ -715,9 +696,6 @@ class ScheduleManager:
         else:
             pool = _get_pool()
             logger.warning(f"⚠️ PostgreSQL недоступен для сохранения расписания {date_str}: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         logger.debug(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
         #         # Сохраняем только измененный день (как в файле)
@@ -800,9 +778,6 @@ class ScheduleManager:
         else:
             pool = _get_pool()
             logger.warning(f"⚠️ PostgreSQL недоступен для добавления в очередь: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         row = [date_str, employee_name, str(telegram_id)]
         #         self.sheets_manager.append_row(SHEET_QUEUE, row)
@@ -911,9 +886,6 @@ class ScheduleManager:
                     logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка удаления из очереди в PostgreSQL: {e}", exc_info=True)
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         # Удаляем все записи для этой даты и добавляем обновленные
         #         worksheet = self.sheets_manager.get_worksheet(SHEET_QUEUE)
@@ -1019,9 +991,6 @@ class ScheduleManager:
                     logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         # Проверяем, есть ли заголовок, если нет - добавляем
         #         worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
@@ -1188,9 +1157,6 @@ class ScheduleManager:
                 clear_requests_from_db_sync(week_str)
             except Exception as e:
                 logger.warning(f"Ошибка очистки заявок в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         worksheet = self.sheets_manager.get_worksheet(SHEET_REQUESTS)
         #         if worksheet:
@@ -1456,8 +1422,7 @@ class ScheduleManager:
     
     def update_employee_name_in_schedules(self, old_name: str, new_formatted_name: str):
         """Обновить имя сотрудника во всех расписаниях в Google Sheets (вкладка schedules)"""
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if not USE_GOOGLE_SHEETS_FOR_WRITES or not self.sheets_manager or not self.sheets_manager.is_available():
+                # if not USE_GOOGLE_SHEETS_FOR_WRITES or not self.sheets_manager or not self.sheets_manager.is_available():
         #     return
         return  # Отключено для ускорения работы бота
         
@@ -1506,9 +1471,6 @@ class ScheduleManager:
                 else:
                     # Оставляем строку без изменений (некорректный формат)
                     rows_to_save.append(row)
-            
-            # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-            # if USE_GOOGLE_SHEETS_FOR_WRITES and updated:
             #     self.sheets_manager.write_rows(SHEET_SCHEDULES, rows_to_save, clear_first=True)
             #     logger.info(f"Обновлено имя сотрудника '{old_name}' → '{new_formatted_name}' во всех расписаниях в Google Sheets")
         except Exception as e:
@@ -1567,9 +1529,6 @@ class ScheduleManager:
         if updated_default_count > 0:
             self.save_default_schedule(default_schedule)
             logger.info(f"Обновлено {updated_default_count} имен в default_schedule")
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES and self.sheets_manager and self.sheets_manager.is_available():
         #     try:
         #         rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
         #         rows = filter_empty_rows(rows)

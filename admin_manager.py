@@ -197,9 +197,6 @@ class AdminManager:
         
         # Сохраняем в PostgreSQL (приоритет 1)
         self._sync_to_postgresql()
-        
-        # Google Sheets используется только как веб-интерфейс, запись отключена для ускорения работы бота
-        # if USE_GOOGLE_SHEETS_FOR_WRITES:
         #     self._sync_to_google_sheets()
     
     def add_admin(self, telegram_id: int) -> bool:
