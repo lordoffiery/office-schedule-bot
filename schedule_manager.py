@@ -1242,8 +1242,41 @@ class ScheduleManager:
                     if requests_dict:
                         logger.debug(f"Заявки для недели {week_str} загружены из PostgreSQL: {len(requests_dict)} записей")
                         return list(requests_dict.values())
+            except ImportError:
+                # Fallback на асинхронную загрузку
+                pool = _get_pool()
+                if pool and load_requests_from_db:
+                    try:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            future = asyncio.run_coroutine_threadsafe(load_requests_from_db(week_str), loop)
+                            db_requests = future.result(timeout=30)
+                        except RuntimeError:
+                            db_requests = asyncio.run(load_requests_from_db(week_str))
+                        
+                        if db_requests:
+                            for req in db_requests:
+                                key = (req['employee_name'], req['telegram_id'])
+                                if key in requests_dict:
+                                    old_req = requests_dict[key]
+                                    combined_requested = list(set(old_req['days_requested'] + req['days_requested']))
+                                    combined_skipped = list(set(old_req['days_skipped'] + req['days_skipped']))
+                                    requests_dict[key] = {
+                                        'employee_name': req['employee_name'],
+                                        'telegram_id': req['telegram_id'],
+                                        'days_requested': combined_requested,
+                                        'days_skipped': combined_skipped
+                                    }
+                                else:
+                                    requests_dict[key] = req
+                            
+                            if requests_dict:
+                                logger.debug(f"Заявки для недели {week_str} загружены из PostgreSQL: {len(requests_dict)} записей")
+                                return list(requests_dict.values())
+                    except Exception as e:
+                        logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка загрузки заявок из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
