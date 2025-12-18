@@ -28,6 +28,7 @@ ENV/
 # Данные (хранятся в Google Sheets)
 data/
 *.txt
+!requirements.txt
 *.log
 
 # Credentials (используются переменные окружения)
