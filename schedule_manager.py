@@ -134,7 +134,7 @@ class ScheduleManager:
                     logger.info(f"Расписание по умолчанию загружено из PostgreSQL: {len(schedule)} дней")
                     return schedule
             except Exception as e:
-                logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки расписания по умолчанию из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
