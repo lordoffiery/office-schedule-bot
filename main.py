@@ -1785,60 +1785,63 @@ async def main():
         logger.info(f"   _pool после test_connection(): {db_module._pool is not None if hasattr(db_module, '_pool') else False}")
         logger.info("✅ PostgreSQL инициализирован и готов к работе")
         
-        # Тестируем операции записи/чтения/удаления в PostgreSQL
-        logger.info("🧪 Тестирование операций PostgreSQL...")
-        test_date_str = "2099-12-31"  # Используем дату далеко в будущем, чтобы не конфликтовать с реальными данными
-        test_day_name = "Понедельник"
-        test_employees = "Тест1, Тест2"
-        
-        try:
-            # Тест 1: Создание записи
-            logger.info("🧪 Тест 1: Создание записи в PostgreSQL...")
-            create_result = await save_schedule_to_db(test_date_str, test_day_name, test_employees)
-            if create_result:
-                logger.info("✅ Тест 1 ПРОЙДЕН: Запись успешно создана в PostgreSQL")
-            else:
-                logger.error("❌ Тест 1 ПРОВАЛЕН: Не удалось создать запись в PostgreSQL")
+        # Опциональное тестирование операций PostgreSQL (включить через TEST_POSTGRESQL=true)
+        if os.getenv('TEST_POSTGRESQL', 'false').lower() == 'true':
+            logger.info("🧪 Тестирование операций PostgreSQL...")
+            test_date_str = "2099-12-31"
+            test_day_name = "Понедельник"
+            test_employees = "Тест1, Тест2"
             
-            # Тест 2: Чтение записи
-            logger.info("🧪 Тест 2: Чтение записи из PostgreSQL...")
-            read_result = await load_schedule_from_db(test_date_str)
-            if read_result and test_day_name in read_result:
-                if read_result[test_day_name] == test_employees:
-                    logger.info("✅ Тест 2 ПРОЙДЕН: Запись успешно прочитана из PostgreSQL, данные совпадают")
+            try:
+                from database_sync import save_schedule_to_db_sync, load_schedule_from_db_sync
+                
+                # Тест 1: Создание записи
+                logger.info("🧪 Тест 1: Создание записи в PostgreSQL...")
+                create_result = save_schedule_to_db_sync(test_date_str, test_day_name, test_employees)
+                if create_result:
+                    logger.info("✅ Тест 1 ПРОЙДЕН: Запись успешно создана в PostgreSQL")
                 else:
-                    logger.error(f"❌ Тест 2 ПРОВАЛЕН: Данные не совпадают. Ожидалось: '{test_employees}', получено: '{read_result[test_day_name]}'")
-            else:
-                logger.error("❌ Тест 2 ПРОВАЛЕН: Не удалось прочитать запись из PostgreSQL")
-            
-            # Тест 3: Обновление записи
-            logger.info("🧪 Тест 3: Обновление записи в PostgreSQL...")
-            updated_employees = "Тест3, Тест4"
-            update_result = await save_schedule_to_db(test_date_str, test_day_name, updated_employees)
-            if update_result:
-                read_updated = await load_schedule_from_db(test_date_str)
-                if read_updated and read_updated.get(test_day_name) == updated_employees:
-                    logger.info("✅ Тест 3 ПРОЙДЕН: Запись успешно обновлена в PostgreSQL")
+                    logger.error("❌ Тест 1 ПРОВАЛЕН: Не удалось создать запись в PostgreSQL")
+                
+                # Тест 2: Чтение записи
+                logger.info("🧪 Тест 2: Чтение записи из PostgreSQL...")
+                read_result = load_schedule_from_db_sync(test_date_str)
+                if read_result and test_day_name in read_result:
+                    if read_result[test_day_name] == test_employees:
+                        logger.info("✅ Тест 2 ПРОЙДЕН: Запись успешно прочитана из PostgreSQL, данные совпадают")
+                    else:
+                        logger.error(f"❌ Тест 2 ПРОВАЛЕН: Данные не совпадают. Ожидалось: '{test_employees}', получено: '{read_result[test_day_name]}'")
                 else:
-                    logger.error("❌ Тест 3 ПРОВАЛЕН: Запись не обновилась корректно")
-            else:
-                logger.error("❌ Тест 3 ПРОВАЛЕН: Не удалось обновить запись в PostgreSQL")
-            
-            # Тест 4: Удаление записи (записываем пустую строку)
-            logger.info("🧪 Тест 4: Удаление записи из PostgreSQL...")
-            delete_result = await save_schedule_to_db(test_date_str, test_day_name, "")
-            if delete_result:
-                read_deleted = await load_schedule_from_db(test_date_str)
-                if not read_deleted or test_day_name not in read_deleted or not read_deleted[test_day_name]:
-                    logger.info("✅ Тест 4 ПРОЙДЕН: Запись успешно удалена из PostgreSQL")
+                    logger.error("❌ Тест 2 ПРОВАЛЕН: Не удалось прочитать запись из PostgreSQL")
+                
+                # Тест 3: Обновление записи
+                logger.info("🧪 Тест 3: Обновление записи в PostgreSQL...")
+                updated_employees = "Тест3, Тест4"
+                update_result = save_schedule_to_db_sync(test_date_str, test_day_name, updated_employees)
+                if update_result:
+                    read_updated = load_schedule_from_db_sync(test_date_str)
+                    if read_updated and read_updated.get(test_day_name) == updated_employees:
+                        logger.info("✅ Тест 3 ПРОЙДЕН: Запись успешно обновлена в PostgreSQL")
+                    else:
+                        logger.error("❌ Тест 3 ПРОВАЛЕН: Запись не обновилась корректно")
                 else:
-                    logger.warning("⚠️ Тест 4: Запись не удалена (возможно, пустая строка не удаляет запись)")
-            else:
-                logger.error("❌ Тест 4 ПРОВАЛЕН: Не удалось удалить запись из PostgreSQL")
-            
-            logger.info("🧪 Тестирование PostgreSQL завершено")
-        except Exception as e:
-            logger.error(f"❌ ОШИБКА при тестировании PostgreSQL: {e}", exc_info=True)
+                    logger.error("❌ Тест 3 ПРОВАЛЕН: Не удалось обновить запись в PostgreSQL")
+                
+                # Тест 4: Удаление записи
+                logger.info("🧪 Тест 4: Удаление записи из PostgreSQL...")
+                delete_result = save_schedule_to_db_sync(test_date_str, test_day_name, "")
+                if delete_result:
+                    read_deleted = load_schedule_from_db_sync(test_date_str)
+                    if not read_deleted or test_day_name not in read_deleted or not read_deleted[test_day_name]:
+                        logger.info("✅ Тест 4 ПРОЙДЕН: Запись успешно удалена из PostgreSQL")
+                    else:
+                        logger.warning("⚠️ Тест 4: Запись не удалена (возможно, пустая строка не удаляет запись)")
+                else:
+                    logger.error("❌ Тест 4 ПРОВАЛЕН: Не удалось удалить запись из PostgreSQL")
+                
+                logger.info("🧪 Тестирование PostgreSQL завершено")
+            except Exception as e:
+                logger.error(f"❌ ОШИБКА при тестировании PostgreSQL: {e}", exc_info=True)
     else:
         logger.warning("⚠️ PostgreSQL не инициализирован, проверьте логи выше для деталей")
         logger.info("⚠️ PostgreSQL недоступен, используем Google Sheets")
