@@ -194,18 +194,7 @@ async def _run_sync_in_background():
         logger.error(f"❌ Ошибка при запуске фоновой синхронизации: {e}", exc_info=True)
 
 # Middleware для автоматической синхронизации после каждой команды
-class SyncMiddleware(BaseMiddleware):
-    async def __call__(
-        self,
-        handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
-        event: Message,
-        data: Dict[str, Any]
-    ) -> Any:
-        # Выполняем обработчик команды
-        result = await handler(event, data)
-        # После выполнения команды запускаем синхронизацию (в фоне)
-        await sync_postgresql_to_sheets()
-        return result
+# SyncMiddleware удален - синхронизация теперь происходит только после команд, изменяющих данные
 
 
 def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -> str:
@@ -343,8 +332,9 @@ async def cmd_start(message: Message):
     keyboard = get_main_keyboard(user_id)
     await message.reply(response, reply_markup=keyboard)
     log_command(user_id, username, user_name, "/start", response)
-    # Запускаем синхронизацию после команды (в фоне)
-    await sync_postgresql_to_sheets()
+    # Синхронизируем только если пользователь был зарегистрирован (данные изменились)
+    if was_new:
+        await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("help"))
@@ -1995,7 +1985,10 @@ async def handle_callback(callback: CallbackQuery):
             logger.warning(f"Неизвестная команда callback: {command}")
             await callback.answer("Неизвестная команда", show_alert=True)
         
-        await sync_postgresql_to_sheets()
+        # Синхронизируем только если команда изменяет данные
+        # Команды, которые только читают: cmd_my_schedule, cmd_full_schedule, cmd_help, cmd_admin_list_admins
+        # Команды, которые изменяют: cmd_set_week_days, cmd_add_day, cmd_skip_day (через подсказки не изменяют)
+        # Для команд с подсказками синхронизация не нужна, так как они только показывают инструкции
     except Exception as e:
         logger.error(f"❌ Ошибка при обработке callback {command}: {e}", exc_info=True)
         try:
@@ -2175,11 +2168,7 @@ async def main():
         asyncio.create_task(sync_postgresql_to_sheets_periodically())
         logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждые 10 минут)")
     
-    # Регистрируем middleware для автоматической синхронизации после каждой команды
-    dp.message.middleware(SyncMiddleware())
-    
-    # Регистрируем обработчики callback-запросов для кнопок
-    dp.callback_query.middleware(SyncMiddleware())
+    # Middleware для синхронизации удален - синхронизация происходит только после команд, изменяющих данные
     
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
     health_thread = threading.Thread(target=start_health_server, daemon=True)
