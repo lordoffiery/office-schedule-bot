@@ -441,25 +441,38 @@ class ScheduleManager:
         week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and load_schedule_from_db:
+        # Используем синхронные функции для проверки
+        if USE_POSTGRESQL:
             try:
-                try:
-                    loop = asyncio.get_running_loop()
-                    for date_str in week_dates_str:
-                        future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
-                        db_schedule = future.result(timeout=2)
-                        if db_schedule:
-                            logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
-                            return True
-                except RuntimeError:
-                    for date_str in week_dates_str:
-                        db_schedule = asyncio.run(load_schedule_from_db(date_str))
-                        if db_schedule:
-                            logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
-                            return True
+                from database_sync import load_schedule_from_db_sync
+                for date_str in week_dates_str:
+                    db_schedule = load_schedule_from_db_sync(date_str)
+                    if db_schedule:
+                        logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
+                        return True
+            except ImportError:
+                # Fallback на асинхронную проверку
+                pool = _get_pool()
+                if pool and load_schedule_from_db:
+                    try:
+                        try:
+                            loop = asyncio.get_running_loop()
+                            for date_str in week_dates_str:
+                                future = asyncio.run_coroutine_threadsafe(load_schedule_from_db(date_str), loop)
+                                db_schedule = future.result(timeout=10)
+                                if db_schedule:
+                                    logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
+                                    return True
+                        except RuntimeError:
+                            for date_str in week_dates_str:
+                                db_schedule = asyncio.run(load_schedule_from_db(date_str))
+                                if db_schedule:
+                                    logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в PostgreSQL")
+                                    return True
+                    except Exception as e:
+                        logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.warning(f"Ошибка проверки расписаний в PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                logger.warning(f"Ошибка проверки расписаний в PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Локальные файлы
         for d, day_name in week_dates:
