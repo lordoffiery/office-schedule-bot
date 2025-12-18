@@ -548,6 +548,8 @@ async def cmd_set_week_days(message: Message):
     
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/set_week_days", message_text)
+    # Синхронизируем после изменения заявок
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("my_schedule"))
@@ -838,6 +840,8 @@ async def cmd_skip_day(message: Message):
     message_text = "\n\n".join(results)
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/skip_day", message_text)
+    # Синхронизируем после изменения расписания/заявок
+    await sync_postgresql_to_sheets()
 
 
 async def process_add_day(date: datetime, employee_name: str, user_id: int, employee_manager, schedule_manager, timezone):
@@ -990,6 +994,8 @@ async def cmd_add_day(message: Message):
     message_text = "\n\n".join(results)
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/add_day", message_text)
+    # Синхронизируем после изменения расписания/очереди
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("full_schedule"))
@@ -1265,6 +1271,8 @@ async def cmd_admin_add_employee(message: Message):
         response = "Не удалось определить Telegram ID пользователя"
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
+    # Синхронизируем после добавления сотрудника (если он был добавлен)
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("admin_add_admin"))
@@ -1359,6 +1367,8 @@ async def cmd_admin_add_admin(message: Message):
         response = "Не удалось определить Telegram ID пользователя"
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_admin", response)
+    # Синхронизируем после добавления админа (если он был добавлен)
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("admin_list_admins"))
@@ -1508,6 +1518,8 @@ async def cmd_admin_set_default_schedule(message: Message):
     )
     await message.reply(response)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_set_default_schedule", response)
+    # Синхронизируем после изменения расписания по умолчанию
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("admin_refresh_schedules"))
@@ -1545,6 +1557,8 @@ async def cmd_admin_refresh_schedules(message: Message):
         response = f"❌ Ошибка при обновлении расписаний: {e}"
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_schedules", response)
+    # Синхронизируем после обновления расписаний
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("admin_skip_day"))
@@ -1625,6 +1639,8 @@ async def cmd_admin_skip_day(message: Message):
     message_text = f"👤 Сотрудник: @{username}\n\n" + "\n\n".join(results)
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_skip_day", message_text)
+    # Синхронизируем после изменения расписания
+    await sync_postgresql_to_sheets()
 
 
 @dp.message(Command("admin_sync_from_sheets"))
@@ -1791,6 +1807,8 @@ async def cmd_admin_add_day(message: Message):
     message_text = f"👤 Сотрудник: @{username}\n\n" + "\n\n".join(results)
     await message.reply(message_text)
     log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_day", message_text)
+    # Синхронизируем после изменения расписания
+    await sync_postgresql_to_sheets()
 
 
 # Обработка текстовых сообщений (для ответов на напоминания)
