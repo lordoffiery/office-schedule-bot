@@ -24,9 +24,26 @@ jobs:
     - name: Login to Yandex Container Registry
       run: |
         # Авторизация через service account JSON ключ
-        echo "${{ secrets.YC_SA_JSON_CREDENTIALS }}" > /tmp/sa-key.json
+        # Используем Python для безопасной записи JSON (правильно обрабатывает все символы)
+        python3 << 'EOF'
+        import os
+        import json
+        
+        credentials = os.environ.get('YC_SA_JSON_CREDENTIALS', '')
+        if credentials:
+            # Пытаемся распарсить как JSON для проверки валидности
+            try:
+                json.loads(credentials)
+            except:
+                pass
+            # Записываем в файл
+            with open('/tmp/sa-key.json', 'w') as f:
+                f.write(credentials)
+        EOF
         cat /tmp/sa-key.json | docker login --username json_key --password-stdin cr.yandex
-        rm /tmp/sa-key.json
+        rm -f /tmp/sa-key.json
+      env:
+        YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
     
     - name: Build Docker image
       run: |
