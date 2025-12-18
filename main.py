@@ -1873,6 +1873,137 @@ async def handle_text_message(message: Message):
             log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "текстовое сообщение (дни недели)", response)
 
 
+# Обработчики callback-запросов для кнопок
+@dp.callback_query(lambda c: c.data.startswith("cmd_"))
+async def handle_callback(callback: CallbackQuery):
+    """Обработчик нажатий на кнопки"""
+    user_id = callback.from_user.id
+    username = callback.from_user.username
+    first_name = callback.from_user.first_name or "Пользователь"
+    command = callback.data
+    
+    logger.info(f"🔘 Callback получен: {command} от пользователя {user_id} (@{username})")
+    
+    try:
+        # Отвечаем на callback, чтобы убрать индикатор загрузки
+        await callback.answer()
+        
+        # Создаем фиктивное сообщение для переиспользования существующих обработчиков
+        class FakeMessage:
+            def __init__(self, user_id, username, first_name, text, original_message):
+                self.from_user = type('obj', (object,), {
+                    'id': user_id,
+                    'username': username,
+                    'first_name': first_name
+                })()
+                self.text = text
+                self._original_message = original_message
+                self._callback = callback
+            
+            async def reply(self, text, reply_markup=None):
+                # Обновляем сообщение вместо отправки нового
+                keyboard = get_main_keyboard(user_id) if reply_markup is None else reply_markup
+                try:
+                    await callback.message.edit_text(text, reply_markup=keyboard)
+                except Exception as e:
+                    logger.warning(f"Не удалось обновить сообщение, отправляю новое: {e}")
+                    # Если не удалось обновить (например, текст не изменился), отправляем новое
+                    await callback.message.answer(text, reply_markup=keyboard)
+        
+        fake_message = FakeMessage(user_id, username, first_name, command, callback.message)
+        
+        # Перенаправляем на соответствующий обработчик
+        if command == "cmd_my_schedule":
+            logger.info(f"Выполняю команду my_schedule для пользователя {user_id}")
+            await cmd_my_schedule(fake_message)
+        elif command == "cmd_full_schedule":
+            logger.info(f"Выполняю команду full_schedule для пользователя {user_id}")
+            await cmd_full_schedule(fake_message)
+        elif command == "cmd_add_day":
+            response = (
+                "➕ Добавить день в расписание\n\n"
+                "Используйте команду:\n"
+                "/add_day [дата]\n\n"
+                "Пример:\n"
+                "/add_day 2024-12-20\n\n"
+                "Можно указать несколько дат:\n"
+                "/add_day 2024-12-20 2024-12-21"
+            )
+            keyboard = get_main_keyboard(user_id)
+            await fake_message.reply(response, reply_markup=keyboard)
+            log_command(user_id, username, first_name, "button_add_day", response[:200])
+        elif command == "cmd_skip_day":
+            response = (
+                "➖ Пропустить день в расписании\n\n"
+                "Используйте команду:\n"
+                "/skip_day [дата]\n\n"
+                "Пример:\n"
+                "/skip_day 2024-12-20\n\n"
+                "Можно указать несколько дат:\n"
+                "/skip_day 2024-12-20 2024-12-21"
+            )
+            keyboard = get_main_keyboard(user_id)
+            await fake_message.reply(response, reply_markup=keyboard)
+            log_command(user_id, username, first_name, "button_skip_day", response[:200])
+        elif command == "cmd_set_week_days":
+            response = (
+                "📝 Указать дни на следующую неделю\n\n"
+                "Используйте команду:\n"
+                "/set_week_days [даты]\n\n"
+                "Пример с датами:\n"
+                "/set_week_days 2024-12-23 2024-12-24 2024-12-26\n\n"
+                "Или с названиями дней:\n"
+                "/set_week_days пн вт чт"
+            )
+            keyboard = get_main_keyboard(user_id)
+            await fake_message.reply(response, reply_markup=keyboard)
+            log_command(user_id, username, first_name, "button_set_week_days", response[:200])
+        elif command == "cmd_help":
+            logger.info(f"Выполняю команду help для пользователя {user_id}")
+            await cmd_help(fake_message)
+        elif command == "cmd_admin_add_employee":
+            response = (
+                "👤 Добавить сотрудника\n\n"
+                "Используйте команду:\n"
+                "/admin_add_employee [имя] @username\n\n"
+                "Или ответьте на сообщение пользователя:\n"
+                "/admin_add_employee [имя]\n\n"
+                "Пример:\n"
+                "/admin_add_employee Иван @ivan_user"
+            )
+            keyboard = get_main_keyboard(user_id)
+            await fake_message.reply(response, reply_markup=keyboard)
+            log_command(user_id, username, first_name, "button_admin_add_employee", response[:200])
+        elif command == "cmd_admin_add_admin":
+            response = (
+                "👑 Добавить администратора\n\n"
+                "Используйте команду:\n"
+                "/admin_add_admin @username\n\n"
+                "Пример:\n"
+                "/admin_add_admin @admin_user"
+            )
+            keyboard = get_main_keyboard(user_id)
+            await fake_message.reply(response, reply_markup=keyboard)
+            log_command(user_id, username, first_name, "button_admin_add_admin", response[:200])
+        elif command == "cmd_admin_list_admins":
+            logger.info(f"Выполняю команду admin_list_admins для пользователя {user_id}")
+            await cmd_admin_list_admins(fake_message)
+        elif command == "cmd_admin_sync_from_sheets":
+            logger.info(f"Выполняю команду admin_sync_from_sheets для пользователя {user_id}")
+            await cmd_admin_sync_from_sheets(fake_message)
+        else:
+            logger.warning(f"Неизвестная команда callback: {command}")
+            await callback.answer("Неизвестная команда", show_alert=True)
+        
+        await sync_postgresql_to_sheets()
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обработке callback {command}: {e}", exc_info=True)
+        try:
+            await callback.answer(f"Ошибка: {str(e)[:50]}", show_alert=True)
+        except:
+            pass
+
+
 # Запуск бота
 async def main():
     """Основная функция запуска бота"""
