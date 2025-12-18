@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Данные (хранятся в Google Sheets)
+data/
+*.txt
+*.log
+
+# Credentials (используются переменные окружения)
+google_credentials.json
+railway_credentials.txt
+.env
+*.env
+
+# Документация (опционально, можно оставить)
+# *.md
+
+# Временные файлы
+.DS_Store
+*.tmp
+*.bak
+
+# Railway специфичные файлы
+Procfile
+railway_setup.md
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+

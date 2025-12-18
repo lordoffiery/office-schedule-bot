@@ -1,0 +1,47 @@
+name: Build and Push to Yandex Cloud
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Позволяет запускать вручную из GitHub UI
+
+env:
+  REGISTRY: cr.yandex
+  IMAGE_NAME: office-schedule-bot
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Yandex Container Registry
+      run: |
+        # Авторизация через service account JSON ключ
+        echo "${{ secrets.YC_SA_JSON_CREDENTIALS }}" > /tmp/sa-key.json
+        cat /tmp/sa-key.json | docker login --username json_key --password-stdin cr.yandex
+        rm /tmp/sa-key.json
+    
+    - name: Build Docker image
+      run: |
+        docker build -t ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest .
+        docker tag ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest \
+                   ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+    
+    - name: Push Docker image
+      run: |
+        docker push ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest
+        docker push ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+    
+    - name: Output image info
+      run: |
+        echo "✅ Образ успешно загружен!"
+        echo "Используйте в Serverless Container:"
+        echo "${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest"
+
