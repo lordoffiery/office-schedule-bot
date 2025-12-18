@@ -61,4 +61,40 @@ jobs:
         echo "✅ Образ успешно загружен!"
         echo "Используйте в Serverless Container:"
         echo "${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest"
+    
+    # Опциональный шаг: Автоматическое обновление контейнера через Yandex Cloud CLI
+    # Раскомментируйте этот шаг, если хотите автоматически обновлять контейнер после сборки
+    # Требует секреты: YC_FOLDER_ID, YC_CONTAINER_ID, YC_SA_JSON_CREDENTIALS (уже есть)
+    # - name: Update Serverless Container
+    #   if: env.UPDATE_CONTAINER == 'true'
+    #   run: |
+    #     # Устанавливаем Yandex Cloud CLI
+    #     curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+    #     export PATH=$PATH:$HOME/yandex-cloud/bin
+    #     
+    #     # Настраиваем авторизацию через Service Account
+    #     python3 << 'EOF'
+    #     import os
+    #     import json
+    #     
+    #     credentials = os.environ.get('YC_SA_JSON_CREDENTIALS', '')
+    #     if credentials:
+    #         with open('/tmp/sa-key.json', 'w') as f:
+    #             f.write(credentials)
+    #     EOF
+    #     
+    #     # Авторизуемся
+    #     yc config set service-account-key /tmp/sa-key.json
+    #     
+    #     # Обновляем контейнер
+    #     yc serverless container revision deploy \
+    #       --container-id ${{ secrets.YC_CONTAINER_ID }} \
+    #       --image ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest \
+    #       --folder-id ${{ secrets.YC_FOLDER_ID }}
+    #     
+    #     rm -f /tmp/sa-key.json
+    #     echo "✅ Контейнер успешно обновлен!"
+    #   env:
+    #     YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+    #     UPDATE_CONTAINER: ${{ secrets.UPDATE_CONTAINER || 'false' }}
 
