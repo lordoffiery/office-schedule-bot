@@ -119,7 +119,7 @@ class GoogleSheetsManager:
         
         # Для низкоприоритетных запросов (логи) используем более строгий лимит
         # Оставляем запас для высокоприоритетных запросов
-        low_priority_limit = int(API_RATE_LIMIT * 0.7)  # 70% лимита для логов
+        low_priority_limit = int(API_RATE_LIMIT * 0.3)  # 30% лимита для логов
         high_priority_limit = API_RATE_LIMIT
         
         if priority == PRIORITY_LOW:
