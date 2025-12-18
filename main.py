@@ -1754,6 +1754,7 @@ async def main():
     else:
         logger.warning("⚠️ PostgreSQL не инициализирован, проверьте логи выше для деталей")
         logger.info("⚠️ PostgreSQL недоступен, используем Google Sheets")
+        use_postgresql = False
     
     # Явно загружаем данные из Google Sheets при старте бота (если PostgreSQL не используется)
     if not use_postgresql:
