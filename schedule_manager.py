@@ -735,7 +735,7 @@ class ScheduleManager:
                         save_schedule_to_db(date_str, day_name, employees_str),
                         loop
                     )
-                    logger.info(f"   Ожидаю результат (timeout=5)...")
+                    logger.info(f"   Ожидаю результат (timeout=30)...")
                     result = future.result(timeout=30)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
@@ -838,7 +838,7 @@ class ScheduleManager:
                         add_to_queue_db(date_str, employee_name, telegram_id),
                         loop
                     )
-                    logger.info(f"   Ожидаю результат (timeout=5)...")
+                    logger.info(f"   Ожидаю результат (timeout=30)...")
                     result = future.result(timeout=30)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
@@ -1092,7 +1092,7 @@ class ScheduleManager:
                         save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped),
                         loop
                     )
-                    logger.info(f"   Ожидаю результат (timeout=5)...")
+                    logger.info(f"   Ожидаю результат (timeout=30)...")
                     result = future.result(timeout=30)  # Ждем результат
                     logger.info(f"   Получен результат: {result}")
                     if result:
