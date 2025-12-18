@@ -708,21 +708,29 @@ class ScheduleManager:
         employees_str = ', '.join(employees)
         
         # Сохраняем в PostgreSQL (приоритет 1)
+        logger.info(f"🔄 Начинаю сохранение расписания {date_str} ({day_name}) в PostgreSQL...")
+        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
         if USE_POSTGRESQL and _pool and save_schedule_to_db:
             try:
+                logger.info(f"   Выполняю save_schedule_to_db({date_str}, {day_name}, {len(employees_str)} символов)...")
                 try:
                     loop = asyncio.get_running_loop()
+                    logger.info(f"   Event loop запущен, использую run_coroutine_threadsafe...")
                     future = asyncio.run_coroutine_threadsafe(
                         save_schedule_to_db(date_str, day_name, employees_str),
                         loop
                     )
+                    logger.info(f"   Ожидаю результат (timeout=5)...")
                     result = future.result(timeout=5)  # Ждем результат
+                    logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
                     else:
                         logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
                 except RuntimeError:
+                    logger.info(f"   Event loop не запущен, использую asyncio.run...")
                     result = asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
+                    logger.info(f"   Получен результат: {result}")
                     if result:
                         logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
                     else:
@@ -731,6 +739,8 @@ class ScheduleManager:
                     logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка при сохранении расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+        else:
+            logger.warning(f"⚠️ PostgreSQL недоступен для сохранения расписания {date_str}: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={_pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
