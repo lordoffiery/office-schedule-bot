@@ -1940,19 +1940,6 @@ async def main():
         logger.info("Запущена задача для периодической синхронизации PostgreSQL -> Google Sheets (каждые 10 минут)")
     
     # Регистрируем middleware для автоматической синхронизации после каждой команды
-    class SyncMiddleware(BaseMiddleware):
-        async def __call__(
-            self,
-            handler: Callable[[Message, Dict[str, Any]], Awaitable[Any]],
-            event: Message,
-            data: Dict[str, Any]
-        ) -> Any:
-            # Выполняем обработчик команды
-            result = await handler(event, data)
-            # После выполнения команды запускаем синхронизацию (в фоне)
-            await sync_postgresql_to_sheets()
-            return result
-    
     dp.message.middleware(SyncMiddleware())
     
     # Запускаем простой HTTP-сервер для health check (в отдельном потоке)
