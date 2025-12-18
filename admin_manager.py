@@ -105,8 +105,8 @@ class AdminManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки администраторов из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
                 db_admins = None
-                
-                if db_admins:
+            
+            if db_admins:
                     self.admins = db_admins
                     logger.info(f"Администраторы загружены из PostgreSQL: {len(self.admins)} записей")
                     # Сохраняем в файл для совместимости

@@ -120,8 +120,8 @@ class EmployeeManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
                 db_employees = None
-                
-                if db_employees:
+            
+            if db_employees:
                     for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
                         self.employees[telegram_id] = (manual_name, telegram_name, username)
                         self.name_to_id[manual_name] = telegram_id
