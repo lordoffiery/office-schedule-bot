@@ -414,15 +414,13 @@ class EmployeeManager:
                 db_pending = None
             
             if db_pending:
-                    self.pending_employees = db_pending
-                    logger.info(f"Отложенные сотрудники загружены из PostgreSQL: {len(self.pending_employees)} записей")
-                    # Сохраняем в файл для совместимости
-                    self._save_pending_employees_to_file_only()
-                    # Синхронизируем с Google Sheets
-                    self._sync_pending_employees_to_google_sheets()
-                    return
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                self.pending_employees = db_pending
+                logger.info(f"Отложенные сотрудники загружены из PostgreSQL: {len(self.pending_employees)} записей")
+                # Сохраняем в файл для совместимости
+                self._save_pending_employees_to_file_only()
+                # Синхронизируем с Google Sheets
+                self._sync_pending_employees_to_google_sheets()
+                return
         
         # ПРИОРИТЕТ 2: Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
