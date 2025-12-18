@@ -402,7 +402,46 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"Ошибка загрузки расписания на {date_str}: {e}")
         
-        # Если файла нет, возвращаем расписание по умолчанию
+        # Если локального файла нет, пытаемся загрузить из Google Sheets
+        if self.sheets_manager and self.sheets_manager.is_available():
+            # Проверяем, есть ли буферизованные операции для schedules
+            # Если есть, приоритет отдаем локальным файлам (которые мы уже проверили выше)
+            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_SCHEDULES)
+            if not has_buffered:
+                try:
+                    rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                    rows = filter_empty_rows(rows)
+                    start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+                    
+                    # Ищем запись для нужной даты
+                    for row in rows[start_idx:]:
+                        if len(row) >= 3 and row[0] and row[0].strip() == date_str:
+                            # Нашли запись для этой даты
+                            day_name = row[1].strip() if len(row) > 1 and row[1] else None
+                            employees_str = row[2].strip() if len(row) > 2 and row[2] else ""
+                            
+                            if day_name and employees_str:
+                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                # Форматируем имена, если нужно
+                                if employee_manager:
+                                    formatted_employees = []
+                                    for emp in employees:
+                                        # Проверяем, отформатировано ли уже имя
+                                        if '(@' in emp and emp.endswith(')'):
+                                            formatted_employees.append(emp)
+                                        else:
+                                            formatted_employees.append(employee_manager.format_employee_name(emp))
+                                    schedule[day_name] = formatted_employees
+                                else:
+                                    schedule[day_name] = employees
+                                
+                                if schedule:
+                                    logger.info(f"Загружено расписание для {date_str} из Google Sheets")
+                                    return schedule
+                except Exception as e:
+                    logger.warning(f"Ошибка загрузки расписания на {date_str} из Google Sheets: {e}, используем расписание по умолчанию")
+        
+        # Если файла нет и в Google Sheets нет, возвращаем расписание по умолчанию
         default_schedule = self.load_default_schedule()
         # Конвертируем из формата JSON (словарь мест) в формат списка для обратной совместимости
         default_schedule_list = self._default_schedule_to_list(default_schedule)
