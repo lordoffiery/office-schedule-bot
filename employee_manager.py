@@ -122,18 +122,16 @@ class EmployeeManager:
                 db_employees = None
             
             if db_employees:
-                    for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
-                        self.employees[telegram_id] = (manual_name, telegram_name, username)
-                        self.name_to_id[manual_name] = telegram_id
-                        self.approved_by_admin[telegram_id] = approved
-                    logger.info(f"Сотрудники загружены из PostgreSQL: {len(self.employees)} записей")
-                    # Сохраняем в файл для совместимости
-                    self._save_employees_to_file_only()
-                    # Синхронизируем с Google Sheets
-                    self._sync_employees_to_google_sheets()
-                    return
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
+                    self.employees[telegram_id] = (manual_name, telegram_name, username)
+                    self.name_to_id[manual_name] = telegram_id
+                    self.approved_by_admin[telegram_id] = approved
+                logger.info(f"Сотрудники загружены из PostgreSQL: {len(self.employees)} записей")
+                # Сохраняем в файл для совместимости
+                self._save_employees_to_file_only()
+                # Синхронизируем с Google Sheets
+                self._sync_employees_to_google_sheets()
+                return
         
         # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -414,8 +412,8 @@ class EmployeeManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL (sync): {type(e).__name__}: {e}", exc_info=True)
                 db_pending = None
-                
-                if db_pending:
+            
+            if db_pending:
                     self.pending_employees = db_pending
                     logger.info(f"Отложенные сотрудники загружены из PostgreSQL: {len(self.pending_employees)} записей")
                     # Сохраняем в файл для совместимости

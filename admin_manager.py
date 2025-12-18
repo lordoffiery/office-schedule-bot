@@ -107,15 +107,13 @@ class AdminManager:
                 db_admins = None
             
             if db_admins:
-                    self.admins = db_admins
-                    logger.info(f"Администраторы загружены из PostgreSQL: {len(self.admins)} записей")
-                    # Сохраняем в файл для совместимости
-                    self._save_admins_to_file_only()
-                    # Синхронизируем с Google Sheets (если доступен)
-                    self._sync_to_google_sheets()
-                    return
-            except Exception as e:
-                logger.warning(f"Ошибка загрузки администраторов из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
+                self.admins = db_admins
+                logger.info(f"Администраторы загружены из PostgreSQL: {len(self.admins)} записей")
+                # Сохраняем в файл для совместимости
+                self._save_admins_to_file_only()
+                # Синхронизируем с Google Sheets (если доступен)
+                self._sync_to_google_sheets()
+                return
         
         # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
         if self.sheets_manager and self.sheets_manager.is_available():
