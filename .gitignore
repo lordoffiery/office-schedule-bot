@@ -24,6 +24,10 @@ data/
 .env
 google_credentials.json
 railway_credentials.txt
+SERVICE_ACCOUNT_INFO.md
+yc_sa_key_minified.json
+*.json
+!package.json
 
 # OS
 .DS_Store
