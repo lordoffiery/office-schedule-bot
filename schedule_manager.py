@@ -592,14 +592,15 @@ class ScheduleManager:
                 try:
                     try:
                         loop = asyncio.get_running_loop()
-                        asyncio.run_coroutine_threadsafe(
+                        future = asyncio.run_coroutine_threadsafe(
                             save_schedule_to_db(date_str, day_name, employees_str),
                             loop
                         )
+                        future.result(timeout=5)  # Ждем результат
                     except RuntimeError:
                         asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
                 except Exception as e:
-                    logger.warning(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}")
+                    logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -703,14 +704,15 @@ class ScheduleManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_schedule_to_db(date_str, day_name, employees_str),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_schedule_to_db(date_str, day_name, employees_str))
             except Exception as e:
-                logger.warning(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}")
+                logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -1005,14 +1007,15 @@ class ScheduleManager:
             try:
                 try:
                     loop = asyncio.get_running_loop()
-                    asyncio.run_coroutine_threadsafe(
+                    future = asyncio.run_coroutine_threadsafe(
                         save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped),
                         loop
                     )
+                    future.result(timeout=5)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_request_to_db(week_str, employee_name, telegram_id, days_requested, days_skipped))
             except Exception as e:
-                logger.warning(f"Ошибка сохранения заявки в PostgreSQL: {e}")
+                logger.error(f"Ошибка сохранения заявки в PostgreSQL: {e}", exc_info=True)
         
         # Сохраняем в Google Sheets (приоритет 2)
         if self.sheets_manager and self.sheets_manager.is_available():
