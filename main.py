@@ -1685,14 +1685,16 @@ async def main():
     init_all()
     
     # Инициализируем PostgreSQL если доступен
-    from database import init_db, test_connection, save_schedule_to_db, load_schedule_from_db, _pool
+    from database import init_db, test_connection, save_schedule_to_db, load_schedule_from_db
     logger.info("🔧 Начинаю инициализацию PostgreSQL...")
     use_postgresql = await init_db()
     logger.info(f"   init_db() вернул: {use_postgresql}")
-    logger.info(f"   _pool после init_db(): {_pool is not None}")
+    # Проверяем _pool через прямой доступ к модулю (после инициализации)
+    import database as db_module
+    logger.info(f"   _pool после init_db(): {db_module._pool is not None if hasattr(db_module, '_pool') else False}")
     if use_postgresql:
         await test_connection()
-        logger.info(f"   _pool после test_connection(): {_pool is not None}")
+        logger.info(f"   _pool после test_connection(): {db_module._pool is not None if hasattr(db_module, '_pool') else False}")
         logger.info("✅ PostgreSQL инициализирован и готов к работе")
         
         # Тестируем операции записи/чтения/удаления в PostgreSQL

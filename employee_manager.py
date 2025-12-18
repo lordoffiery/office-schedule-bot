@@ -94,9 +94,12 @@ class EmployeeManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(load_employees_from_db(), loop)
-                    db_employees = future.result(timeout=5)
+                    db_employees = future.result(timeout=10)
                 except RuntimeError:
                     db_employees = asyncio.run(load_employees_from_db())
+                except Exception as e:
+                    logger.warning(f"Ошибка при выполнении load_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
+                    db_employees = None
                 
                 if db_employees:
                     for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
@@ -110,7 +113,7 @@ class EmployeeManager:
                     self._sync_employees_to_google_sheets()
                     return
             except Exception as e:
-                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Google Sheets (если PostgreSQL недоступен)
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -249,7 +252,7 @@ class EmployeeManager:
                         save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    future.result(timeout=10)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, approved))
             except Exception as e:
@@ -317,7 +320,7 @@ class EmployeeManager:
                         save_employee_to_db(telegram_id, name, telegram_name, username, True),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    future.result(timeout=10)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, name, telegram_name, username, True))
             except Exception as e:
@@ -365,9 +368,12 @@ class EmployeeManager:
                 try:
                     loop = asyncio.get_running_loop()
                     future = asyncio.run_coroutine_threadsafe(load_pending_employees_from_db(), loop)
-                    db_pending = future.result(timeout=5)
+                    db_pending = future.result(timeout=10)
                 except RuntimeError:
                     db_pending = asyncio.run(load_pending_employees_from_db())
+                except Exception as e:
+                    logger.warning(f"Ошибка при выполнении load_pending_employees_from_db: {type(e).__name__}: {e}", exc_info=True)
+                    db_pending = None
                 
                 if db_pending:
                     self.pending_employees = db_pending
@@ -378,7 +384,7 @@ class EmployeeManager:
                     self._sync_pending_employees_to_google_sheets()
                     return
             except Exception as e:
-                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {e}")
+                logger.warning(f"Ошибка загрузки отложенных сотрудников из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
         # ПРИОРИТЕТ 2: Google Sheets
         if self.sheets_manager and self.sheets_manager.is_available():
@@ -451,11 +457,13 @@ class EmployeeManager:
                         save_pending_employee_to_db(username, manual_name),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    future.result(timeout=10)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_pending_employee_to_db(username, manual_name))
+                except Exception as e:
+                    logger.warning(f"Ошибка при выполнении save_pending_employee_to_db: {type(e).__name__}: {e}", exc_info=True)
             except Exception as e:
-                logger.error(f"❌ Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {e}", exc_info=True)
+                logger.error(f"❌ Ошибка синхронизации отложенного сотрудника {username} с PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
     
     def _sync_pending_employees_to_google_sheets(self):
         """Синхронизировать отложенных сотрудников с Google Sheets"""
@@ -505,7 +513,7 @@ class EmployeeManager:
                         save_pending_employee_to_db(username_lower, manual_name),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    future.result(timeout=10)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_pending_employee_to_db(username_lower, manual_name))
             except Exception as e:
@@ -536,7 +544,7 @@ class EmployeeManager:
                             remove_pending_employee_from_db(username_lower),
                             loop
                         )
-                        future.result(timeout=5)  # Ждем результат
+                        future.result(timeout=10)  # Ждем результат
                     except RuntimeError:
                         asyncio.run(remove_pending_employee_from_db(username_lower))
                 except Exception as e:
@@ -571,7 +579,7 @@ class EmployeeManager:
                                 save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved),
                                 loop
                             )
-                            future.result(timeout=5)  # Ждем результат
+                            future.result(timeout=10)  # Ждем результат
                         except RuntimeError:
                             asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username or old_username, approved))
                     except Exception as e:
@@ -611,7 +619,7 @@ class EmployeeManager:
                         save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin),
                         loop
                     )
-                    future.result(timeout=5)  # Ждем результат
+                    future.result(timeout=10)  # Ждем результат
                 except RuntimeError:
                     asyncio.run(save_employee_to_db(telegram_id, manual_name, telegram_name, username, was_added_by_admin))
             except Exception as e:
