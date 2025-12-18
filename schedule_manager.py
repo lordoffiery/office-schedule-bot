@@ -349,14 +349,25 @@ class ScheduleManager:
                 return True
         
         # Если локальных файлов нет, проверяем Google Sheets
+        # ВАЖНО: Проверяем наличие буферизованных операций - если есть, не проверяем Google Sheets
+        # чтобы не перезаписать актуальные данные из локальных файлов
         if self.sheets_manager and self.sheets_manager.is_available():
+            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_SCHEDULES)
+            if has_buffered:
+                logger.debug(f"Есть буферизованные операции для {SHEET_SCHEDULES}, пропускаем проверку Google Sheets")
+                return False
+            
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
                 rows = filter_empty_rows(rows)
+                if not rows:
+                    return False
+                    
                 start_idx, _ = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
                 week_dates_str = [d.strftime('%Y-%m-%d') for d, _ in week_dates]
                 for row in rows[start_idx:]:
                     if len(row) >= 1 and row[0] and row[0].strip() in week_dates_str:
+                        logger.debug(f"Найдено сохраненное расписание для недели {week_start.strftime('%Y-%m-%d')} в Google Sheets")
                         return True
             except Exception as e:
                 logger.warning(f"Ошибка проверки расписаний в Google Sheets: {e}")

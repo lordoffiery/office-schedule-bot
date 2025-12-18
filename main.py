@@ -1700,6 +1700,29 @@ async def main():
         schedule_manager.load_default_schedule()
         logger.info("✅ Расписание по умолчанию загружено")
         
+        # Предзагружаем расписания из Google Sheets для текущей и следующей недели
+        # Это гарантирует, что данные будут доступны при первом вызове команд
+        now = datetime.now(timezone)
+        current_week_start = schedule_manager.get_week_start(now)
+        next_week_start = current_week_start + timedelta(days=7)
+        
+        # Предзагружаем расписания для текущей недели
+        week_dates = schedule_manager.get_week_dates(current_week_start)
+        for d, day_name in week_dates:
+            try:
+                schedule_manager.load_schedule_for_date(d, employee_manager)
+            except Exception as e:
+                logger.debug(f"Не удалось предзагрузить расписание для {d.strftime('%Y-%m-%d')}: {e}")
+        
+        # Предзагружаем расписания для следующей недели
+        week_dates = schedule_manager.get_week_dates(next_week_start)
+        for d, day_name in week_dates:
+            try:
+                schedule_manager.load_schedule_for_date(d, employee_manager)
+            except Exception as e:
+                logger.debug(f"Не удалось предзагрузить расписание для {d.strftime('%Y-%m-%d')}: {e}")
+        
+        logger.info("✅ Расписания предзагружены из Google Sheets")
         logger.info("✅ Все данные успешно загружены из Google Sheets")
     except Exception as e:
         logger.error(f"❌ Ошибка при загрузке данных из Google Sheets: {e}", exc_info=True)
