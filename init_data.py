@@ -31,11 +31,10 @@ def init_default_schedule():
 
 def init_admins_file():
     """Инициализировать файл с администраторами, если его нет"""
+    # НЕ создаем файл автоматически - пусть AdminManager сам решает, когда создавать файл
+    # Это предотвращает перезапись существующих админов из Google Sheets
     if not os.path.exists(ADMINS_FILE):
-        with open(ADMINS_FILE, 'w', encoding='utf-8') as f:
-            for admin_id in ADMIN_IDS:
-                f.write(f"{admin_id}\n")
-        logger.info(f"Создан файл {ADMINS_FILE} с администраторами: {', '.join(map(str, ADMIN_IDS))}")
+        logger.debug(f"Файл {ADMINS_FILE} не существует, будет создан при первой загрузке админов")
 
 
 def init_employees_file():
