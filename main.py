@@ -382,6 +382,8 @@ async def cmd_help(message: Message):
             "   Используйте после ручного добавления сотрудников в Google Sheets\n\n"
             "/admin_refresh_names - Принудительно обновить имена сотрудников в расписаниях (добавить username)\n"
             "   Обновляет имена в default_schedule и schedules за последние 60 дней\n\n"
+            "/admin_sync_requests_from_schedules - Восстановить заявки (requests) из расписаний (schedules)\n"
+            "   Восстанавливает заявки для будущих недель на основе текущих расписаний\n\n"
             "/admin_sync_from_sheets - Синхронизировать данные из Google Sheets в PostgreSQL\n"
             "   Используйте после ручного изменения данных в Google Sheets"
         )
@@ -1667,6 +1669,86 @@ async def cmd_admin_refresh_names(message: Message):
             await message.answer(error_response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", error_response)
         logger.error(f"Ошибка обновления имен в расписаниях: {e}", exc_info=True)
+
+
+@dp.message(Command("admin_sync_requests_from_schedules"))
+async def cmd_admin_sync_requests_from_schedules(message: Message):
+    """Восстановить заявки (requests) из расписаний (schedules) для будущих недель"""
+    user_id = message.from_user.id
+    user_info = get_user_info(message)
+    
+    if not admin_manager.is_admin(user_id):
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_requests_from_schedules", response)
+        return
+    
+    response = "🔄 Начинаю восстановление заявок из расписаний для будущих недель...\n\n"
+    status_message = await message.answer(response)
+    
+    async def update_status(text: str):
+        """Безопасное обновление статуса сообщения"""
+        try:
+            await status_message.edit_text(text)
+        except Exception as e:
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+            pass
+    
+    try:
+        from datetime import datetime, timedelta
+        import pytz
+        
+        timezone = pytz.timezone(TIMEZONE)
+        now = datetime.now(timezone)
+        current_week_start = schedule_manager.get_week_start(now)
+        
+        # Синхронизируем следующие 4 недели (текущая + 3 будущие)
+        total_synced = 0
+        total_errors = 0
+        
+        for week_offset in range(4):
+            week_start = current_week_start + timedelta(days=7 * week_offset)
+            week_str = week_start.strftime('%Y-%m-%d')
+            
+            # Проверяем, есть ли расписание на эту неделю
+            has_schedule = schedule_manager.has_schedule_for_week(week_start)
+            
+            if has_schedule:
+                response += f"📅 Неделя {week_str}...\n"
+                await update_status(response)
+                
+                stats = schedule_manager.sync_requests_from_schedules(week_start, employee_manager)
+                total_synced += stats['synced']
+                total_errors += stats['errors']
+                
+                if stats['synced'] > 0:
+                    response += f"   ✅ Восстановлено {stats['synced']} заявок\n"
+                if stats['errors'] > 0:
+                    response += f"   ⚠️ Ошибок: {stats['errors']}\n"
+            else:
+                response += f"📅 Неделя {week_str}: расписание отсутствует, пропускаем\n"
+        
+        response += f"\n📊 Итого:\n"
+        response += f"   ✅ Восстановлено заявок: {total_synced}\n"
+        if total_errors > 0:
+            response += f"   ⚠️ Ошибок: {total_errors}\n"
+        
+        # Синхронизируем с Google Sheets
+        response += "\n🔄 Синхронизирую с Google Sheets..."
+        await update_status(response)
+        await sync_postgresql_to_sheets()
+        
+        response += "\n✅ Синхронизация завершена!"
+        await update_status(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_requests_from_schedules", response)
+    except Exception as e:
+        error_response = f"❌ Ошибка при восстановлении заявок: {e}"
+        try:
+            await status_message.edit_text(error_response)
+        except:
+            await message.answer(error_response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_sync_requests_from_schedules", error_response)
+        logger.error(f"Ошибка восстановления заявок из расписаний: {e}", exc_info=True)
 
 
 @dp.message(Command("admin_refresh_schedules"))
