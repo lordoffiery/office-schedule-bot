@@ -566,7 +566,7 @@ class ScheduleManager:
     
     def save_schedule_for_week(self, week_start: datetime, schedule: Dict[str, List[str]], 
                               only_changed_days: bool = False, employee_manager=None,
-                              changed_days: Optional[Set[str]] = None):
+                              changed_days=None):
         """
         Сохранить расписание на неделю в PostgreSQL, Google Sheets и файлы
         
@@ -580,7 +580,6 @@ class ScheduleManager:
         from datetime import datetime as dt
         import pytz
         from config import TIMEZONE
-        from typing import Set, Optional
         
         week_dates = self.get_week_dates(week_start)
         timezone = pytz.timezone(TIMEZONE)
