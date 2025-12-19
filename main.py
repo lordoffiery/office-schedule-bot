@@ -1192,7 +1192,15 @@ async def cmd_admin_add_employee(message: Message):
                 return
             
             # Сохраняем отложенную запись для использования при /start
-            was_existing, old_name = employee_manager.add_pending_employee(username, name)
+            try:
+                was_existing, old_name = employee_manager.add_pending_employee(username, name)
+            except ValueError as e:
+                # Пользователь является администратором
+                response = str(e)
+                await message.reply(response)
+                log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
+                return
+            
             if was_existing:
                 # Запись уже существовала - обновлено имя
                 response = (
