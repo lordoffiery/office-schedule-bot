@@ -1747,20 +1747,24 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                         default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
                         
                         if schedule_employees != default_employees:
-                            # День изменился - используем из schedule, но дополняем до полного расписания из default
+                            # День изменился - используем из schedule, но дополняем пустые места из default
                             changed_days.add(day_name)
-                            # Берем измененное расписание из schedule, но если мест меньше чем в default, дополняем из default
                             schedule_day = schedule.get(day_name, [])
                             default_day = formatted_default.get(day_name, [])
                             
-                            # Если в schedule меньше людей, чем в default, дополняем из default
-                            if len(schedule_day) < len(default_day):
-                                # Создаем множество имен из schedule для быстрой проверки
-                                schedule_names = set([e.strip() for e in schedule_day if e.strip()])
-                                # Добавляем недостающих из default
-                                for emp in default_day:
-                                    if emp.strip() not in schedule_names:
-                                        schedule_day.append(emp)
+                            # Создаем множество имен из schedule для быстрой проверки
+                            schedule_names = set([e.strip() for e in schedule_day if e.strip()])
+                            
+                            # Дополняем недостающими из default (до количества мест в default)
+                            # Но только тех, кого нет в schedule
+                            for emp in default_day:
+                                emp_stripped = emp.strip()
+                                if emp_stripped and emp_stripped not in schedule_names:
+                                    schedule_day.append(emp)
+                                    schedule_names.add(emp_stripped)
+                                    # Останавливаемся, когда достигли количества мест в default
+                                    if len(schedule_day) >= len(default_day):
+                                        break
                             
                             final_schedule[day_name] = schedule_day
                         else:
