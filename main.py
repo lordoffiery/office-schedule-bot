@@ -1737,6 +1737,9 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                         if req.get('days_skipped'):
                             changed_days.update(req['days_skipped'])
                     
+                    logger.info(f"📋 Неделя {week_str}: определены измененные дни через requests: {changed_days}")
+                    logger.info(f"📋 Неделя {week_str}: построенное расписание содержит дни: {list(schedule.keys())}")
+                    
                     # Сохраняем только измененные дни для будущих недель
                     schedule_manager.save_schedule_for_week(week_start, schedule, only_changed_days=True, 
                                                           employee_manager=employee_manager, changed_days=changed_days)
