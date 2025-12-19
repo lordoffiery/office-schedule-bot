@@ -627,14 +627,8 @@ class ScheduleManager:
                             logger.debug(f"Сохранено измененное расписание для {date_str} ({day_name})")
                         except Exception as e:
                             logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
-                    else:
-                        # Удаляем из schedules, если теперь совпадает с default
-                        try:
-                            from database_sync import delete_schedule_from_db_sync
-                            delete_schedule_from_db_sync(date_str)
-                            logger.debug(f"Удалено расписание для {date_str} (совпадает с default)")
-                        except Exception as e:
-                            logger.debug(f"Не удалось удалить расписание для {date_str}: {e}")
+                    # Не удаляем существующие записи, даже если они совпадают с default
+                    # Они могли быть созданы ранее и их нужно оставить
                 else:
                     # Сохраняем все дни (старое поведение)
                     employees_str = ', '.join(employees)
@@ -696,7 +690,7 @@ class ScheduleManager:
             
             if only_changed_days:
                 if is_different:
-                    # Сохраняем только если отличается
+                    # Сохраняем только если отличается от default
                     schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
                     try:
                         with open(schedule_file, 'w', encoding='utf-8') as f:
@@ -705,15 +699,8 @@ class ScheduleManager:
                             f.write(f"{', '.join(employees)}\n")
                     except Exception as e:
                         logger.error(f"Ошибка сохранения расписания {date_str} в файл: {e}")
-                else:
-                    # Удаляем файл, если совпадает с default
-                    schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
-                    if os.path.exists(schedule_file):
-                        try:
-                            os.remove(schedule_file)
-                            logger.debug(f"Удален файл расписания для {date_str} (совпадает с default)")
-                        except Exception as e:
-                            logger.debug(f"Не удалось удалить файл расписания для {date_str}: {e}")
+                # Не удаляем существующие файлы, даже если они совпадают с default
+                # Они могли быть созданы ранее и их нужно оставить
             else:
                 # Сохраняем все дни (старое поведение)
                 schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")

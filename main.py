@@ -1701,14 +1701,21 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
         timezone = pytz.timezone(TIMEZONE)
         now = datetime.now(timezone)
         current_week_start = schedule_manager.get_week_start(now)
+        today = now.date()
         
-        # Перестраиваем следующие 4 недели (текущая + 3 будущие)
+        # Перестраиваем только будущие недели (начиная со следующей)
         total_rebuilt = 0
         total_errors = 0
         
-        for week_offset in range(4):
+        # Начинаем со следующей недели (week_offset = 1)
+        for week_offset in range(1, 5):  # Следующие 4 недели
             week_start = current_week_start + timedelta(days=7 * week_offset)
             week_str = week_start.strftime('%Y-%m-%d')
+            
+            # Дополнительная проверка: пропускаем недели, которые уже начались
+            week_start_date = week_start.date()
+            if week_start_date <= today:
+                continue
             
             # Загружаем заявки на эту неделю
             requests = schedule_manager.load_requests_for_week(week_start)
