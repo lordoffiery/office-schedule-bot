@@ -1510,8 +1510,22 @@ class ScheduleManager:
             days_requested = req_info['days_requested']
             days_skipped = req_info['days_skipped']
             
+            logger.info(f"build_schedule_from_requests: обрабатываем заявку для {employee_name}")
+            logger.info(f"  days_requested: {days_requested}")
+            logger.info(f"  days_skipped: {days_skipped}")
+            
             # Получаем фиксированное место сотрудника (если есть)
             fixed_place = employee_to_place.get(employee_name)
+            logger.info(f"  fixed_place: {fixed_place}")
+            
+            # Проверяем, где сотрудник был до обработки заявок (из default_schedule)
+            employee_in_default_days = set()
+            for day_name, places_dict in default_schedule.items():
+                for place_key, name in places_dict.items():
+                    plain_name = self.get_plain_name_from_formatted(name)
+                    if plain_name == employee_name:
+                        employee_in_default_days.add(day_name)
+            logger.info(f"  employee_in_default_days: {employee_in_default_days}")
             
             # Сначала добавляем сотрудника в запрошенные дни
             # Это нужно сделать до удаления, чтобы знать, какие дни были добавлены через requests
@@ -1546,8 +1560,18 @@ class ScheduleManager:
                     # Проверяем, был ли этот день в days_requested (т.е. сотрудник был добавлен через requests)
                     # Если день был в days_requested, значит сотрудник был добавлен через requests, и его можно удалить
                     # Если день не был в days_requested, значит сотрудник был в default_schedule, и его не удаляем
-                    if day in days_requested:
+                    day_was_requested = day in days_requested
+                    day_was_in_default = day in employee_in_default_days
+                    
+                    logger.info(f"build_schedule_from_requests: {employee_name}, день {day}: был запрошен={day_was_requested}, был в default={day_was_in_default}, пропущен=True")
+                    
+                    # Проверяем, есть ли сотрудник в расписании на этот день
+                    place_key_before = self._find_employee_in_places(schedule[day], employee_name)
+                    logger.info(f"  сотрудник в расписании до удаления: {place_key_before is not None}")
+                    
+                    if day_was_requested:
                         # День был запрошен через requests - удаляем сотрудника
+                        logger.info(f"  ✅ УДАЛЯЕМ {employee_name} из {day} (день был запрошен через requests)")
                         if fixed_place and fixed_place in schedule[day]:
                             # Освобождаем место
                             schedule[day][fixed_place] = ''
@@ -1556,8 +1580,14 @@ class ScheduleManager:
                             place_key = self._find_employee_in_places(schedule[day], employee_name)
                             if place_key:
                                 schedule[day][place_key] = ''
-                    # Если день не был в days_requested, значит сотрудник был в default_schedule
-                    # и days_skipped не должен его удалять (сотрудник остается в default_schedule)
+                    else:
+                        # День не был в days_requested, значит сотрудник был в default_schedule
+                        # days_skipped не должен его удалять (сотрудник остается в default_schedule)
+                        logger.info(f"  ❌ НЕ удаляем {employee_name} из {day} (день не был запрошен, сотрудник был в default_schedule)")
+                    
+                    # Проверяем, остался ли сотрудник в расписании после обработки
+                    place_key_after = self._find_employee_in_places(schedule[day], employee_name)
+                    logger.info(f"  сотрудник в расписании после обработки: {place_key_after is not None}")
         
         # Конвертируем обратно в формат списка для вывода
         formatted_schedule = {}
