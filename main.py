@@ -782,6 +782,9 @@ async def process_skip_day(date: datetime, employee_name: str, user_id: int, emp
         # Сохраняем обновленную заявку сотрудника
         schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
         
+        # Автоматически перестраиваем расписания для этой недели в фоне
+        asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
+        
         return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков на следующую неделю"
 
 
@@ -935,6 +938,9 @@ async def process_add_day(date: datetime, employee_name: str, user_id: int, empl
                 )
         # Сохраняем обновленную заявку сотрудника
         schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
+        
+        # Автоматически перестраиваем расписания для этой недели в фоне
+        asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
         
         return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список запрошенных дней на следующую неделю"
 
@@ -1669,6 +1675,84 @@ async def cmd_admin_refresh_names(message: Message):
             await message.answer(error_response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", error_response)
         logger.error(f"Ошибка обновления имен в расписаниях: {e}", exc_info=True)
+
+
+async def rebuild_schedules_for_week_async(week_start: datetime, schedule_manager, employee_manager):
+    """Асинхронная функция для перестройки расписаний для одной недели (запускается в фоне)"""
+    try:
+        from datetime import datetime, timedelta
+        import pytz
+        
+        timezone = pytz.timezone(TIMEZONE)
+        now = datetime.now(timezone)
+        today = now.date()
+        week_start_date = week_start.date()
+        
+        # Пропускаем недели, которые уже начались
+        if week_start_date <= today:
+            logger.debug(f"Пропускаем неделю {week_start.strftime('%Y-%m-%d')} - уже началась")
+            return
+        
+        week_str = week_start.strftime('%Y-%m-%d')
+        logger.info(f"🔄 Автоматическая перестройка расписаний для недели {week_str}")
+        
+        # Загружаем заявки на эту неделю
+        requests = schedule_manager.load_requests_for_week(week_start)
+        
+        if not requests:
+            logger.debug(f"Нет заявок для недели {week_str} - пропускаем")
+            return
+        
+        # Берем default_schedule как базу
+        default_schedule = schedule_manager.load_default_schedule()
+        default_schedule_list = schedule_manager._default_schedule_to_list(default_schedule)
+        
+        # Форматируем имена в default_schedule для сравнения
+        formatted_default = {}
+        for day, employees in default_schedule_list.items():
+            formatted_default[day] = [employee_manager.format_employee_name(emp) for emp in employees]
+        
+        # Строим расписание на основе заявок
+        schedule, removed_by_skipped = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
+        
+        # Определяем дни, которые реально отличаются от default после применения requests
+        changed_days = set()
+        final_schedule = {}
+        
+        for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+            schedule_employees = sorted([e.strip() for e in schedule.get(day_name, []) if e.strip()])
+            default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
+            
+            if schedule_employees != default_employees:
+                schedule_day = schedule.get(day_name, [])
+                default_day = formatted_default.get(day_name, [])
+                
+                schedule_names = set([e.strip() for e in schedule_day if e.strip()])
+                
+                # Дополняем пустые места из default до полного расписания
+                for emp in default_day:
+                    emp_stripped = emp.strip()
+                    emp_plain = schedule_manager.get_plain_name_from_formatted(emp_stripped)
+                    if emp_stripped and emp_stripped not in schedule_names:
+                        if emp_plain not in removed_by_skipped.get(day_name, set()):
+                            schedule_day.append(emp)
+                            schedule_names.add(emp_stripped)
+                            if len(schedule_day) >= len(default_day):
+                                break
+                
+                changed_days.add(day_name)
+                final_schedule[day_name] = schedule_day
+        
+        # Сохраняем только измененные дни для будущих недель
+        if changed_days:
+            schedule_manager.save_schedule_for_week(week_start, final_schedule, only_changed_days=True, 
+                                                  employee_manager=employee_manager, changed_days=changed_days)
+            logger.info(f"✅ Автоматически перестроено расписание для недели {week_str}: {len(changed_days)} измененных дней")
+        else:
+            logger.debug(f"Нет изменений для недели {week_str} - расписание не обновлено")
+            
+    except Exception as e:
+        logger.error(f"Ошибка автоматической перестройки расписаний для недели {week_start.strftime('%Y-%m-%d')}: {e}", exc_info=True)
 
 
 @dp.message(Command("admin_rebuild_schedules_from_requests"))
