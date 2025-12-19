@@ -1747,9 +1747,22 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                         default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
                         
                         if schedule_employees != default_employees:
-                            # День изменился - используем из schedule
+                            # День изменился - используем из schedule, но дополняем до полного расписания из default
                             changed_days.add(day_name)
-                            final_schedule[day_name] = schedule.get(day_name, [])
+                            # Берем измененное расписание из schedule, но если мест меньше чем в default, дополняем из default
+                            schedule_day = schedule.get(day_name, [])
+                            default_day = formatted_default.get(day_name, [])
+                            
+                            # Если в schedule меньше людей, чем в default, дополняем из default
+                            if len(schedule_day) < len(default_day):
+                                # Создаем множество имен из schedule для быстрой проверки
+                                schedule_names = set([e.strip() for e in schedule_day if e.strip()])
+                                # Добавляем недостающих из default
+                                for emp in default_day:
+                                    if emp.strip() not in schedule_names:
+                                        schedule_day.append(emp)
+                            
+                            final_schedule[day_name] = schedule_day
                         else:
                             # День не изменился - используем из default
                             final_schedule[day_name] = formatted_default.get(day_name, [])
