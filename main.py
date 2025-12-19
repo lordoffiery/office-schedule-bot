@@ -1729,6 +1729,44 @@ async def rebuild_schedules_for_week_async(week_start: datetime, schedule_manage
         default_schedule = schedule_manager.load_default_schedule()
         default_schedule_list = schedule_manager._default_schedule_to_list(default_schedule)
         
+        # Фильтруем заявки: убираем из days_requested те дни, которых не было в default_schedule для сотрудника
+        # Это предотвращает ситуацию, когда сотрудник запрашивает день, которого нет в default_schedule,
+        # а потом делает skip_day, что запускает перестройку и применяет запрос раньше воскресенья
+        filtered_requests = []
+        for req in requests:
+            employee_name = req['employee_name']
+            days_requested = req['days_requested'].copy()
+            days_skipped = req['days_skipped'].copy()
+            
+            # Проверяем, какие дни из days_requested были в default_schedule для этого сотрудника
+            employee_default_days = set()
+            for day_n, places_dict in default_schedule.items():
+                for place_key, name in places_dict.items():
+                    plain_name = schedule_manager.get_plain_name_from_formatted(name)
+                    if plain_name == employee_name:
+                        employee_default_days.add(day_n)
+                        break
+            
+            # Фильтруем days_requested - оставляем только те дни, которые были в default_schedule
+            filtered_days_requested = [day for day in days_requested if day in employee_default_days]
+            
+            # Если были удалены дни из days_requested, логируем
+            if len(filtered_days_requested) < len(days_requested):
+                removed_days = set(days_requested) - set(filtered_days_requested)
+                logger.info(f"Фильтрация заявки для {employee_name}: удалены дни {removed_days} из days_requested (не были в default_schedule)")
+            
+            # Создаем отфильтрованную заявку
+            filtered_req = {
+                'employee_name': employee_name,
+                'telegram_id': req['telegram_id'],
+                'days_requested': filtered_days_requested,
+                'days_skipped': days_skipped
+            }
+            filtered_requests.append(filtered_req)
+        
+        # Используем отфильтрованные заявки
+        requests = filtered_requests
+        
         # Форматируем имена в default_schedule для сравнения
         formatted_default = {}
         for day, employees in default_schedule_list.items():
