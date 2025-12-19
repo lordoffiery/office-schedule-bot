@@ -601,6 +601,26 @@ class ScheduleManager:
         # Сохраняем в PostgreSQL (приоритет 1)
         pool = _get_pool()
         if USE_POSTGRESQL and pool and save_schedule_to_db:
+            # Собираем все даты недели для проверки существующих записей
+            week_date_strs = []
+            for date, day_name in week_dates:
+                date_obj = date.date()
+                if date_obj > today:  # Только будущие даты
+                    week_date_strs.append(date.strftime('%Y-%m-%d'))
+            
+            # Загружаем существующие расписания для этой недели
+            existing_schedules = set()
+            if only_changed_days and changed_days is not None:
+                try:
+                    from database_sync import load_schedule_from_db_sync
+                    for date_str in week_date_strs:
+                        existing = load_schedule_from_db_sync(date_str)
+                        if existing:
+                            existing_schedules.add(date_str)
+                    logger.info(f"Найдено существующих расписаний для недели {week_start.strftime('%Y-%m-%d')}: {existing_schedules}")
+                except Exception as e:
+                    logger.warning(f"Ошибка загрузки существующих расписаний: {e}")
+            
             for date, day_name in week_dates:
                 date_obj = date.date()
                 
@@ -624,11 +644,14 @@ class ScheduleManager:
                     # 1. День был явно изменен через requests (если changed_days указан) - сохраняем ВСЕГДА, даже если совпадает с default
                     # 2. ИЛИ день отличается от default (если changed_days не указан)
                     should_save = False
+                    should_delete = False
                     if changed_days is not None:
                         # Сохраняем все дни, которые были изменены через requests (даже если результат совпадает с default)
                         day_in_changed = day_name in changed_days
                         should_save = day_in_changed  # Убираем проверку is_different - сохраняем все измененные дни
-                        logger.info(f"Проверка дня {date_str} ({day_name}): в changed_days={day_in_changed}, отличается от default={is_different}, should_save={should_save}")
+                        # Удаляем дни, которых нет в changed_days, но они есть в schedules
+                        should_delete = not day_in_changed and date_str in existing_schedules
+                        logger.info(f"Проверка дня {date_str} ({day_name}): в changed_days={day_in_changed}, отличается от default={is_different}, should_save={should_save}, should_delete={should_delete}")
                         if day_in_changed:
                             logger.info(f"  changed_days содержит: {changed_days}")
                             logger.info(f"  schedule: {employees_sorted}")
@@ -650,10 +673,20 @@ class ScheduleManager:
                                 logger.warning(f"⚠️ Не удалось сохранить расписание для {date_str} ({day_name}) в PostgreSQL (вернуло False)")
                         except Exception as e:
                             logger.error(f"❌ Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+                    elif should_delete:
+                        # Удаляем день, который не был изменен через requests, но есть в schedules
+                        try:
+                            from database_sync import delete_schedule_from_db_sync
+                            logger.info(f"🗑️ Удаление расписания для {date_str} ({day_name}) из PostgreSQL (не в requests)...")
+                            result = delete_schedule_from_db_sync(date_str)
+                            if result:
+                                logger.info(f"✅ Удалено расписание для {date_str} ({day_name}) из PostgreSQL")
+                            else:
+                                logger.warning(f"⚠️ Не удалось удалить расписание для {date_str} ({day_name}) из PostgreSQL")
+                        except Exception as e:
+                            logger.error(f"❌ Ошибка удаления расписания {date_str} из PostgreSQL: {e}", exc_info=True)
                     else:
-                        logger.debug(f"Пропуск дня {date_str} ({day_name}): не соответствует условиям сохранения")
-                    # Не удаляем существующие записи, даже если они совпадают с default
-                    # Они могли быть созданы ранее и их нужно оставить
+                        logger.debug(f"Пропуск дня {date_str} ({day_name}): не соответствует условиям сохранения и не требует удаления")
                 else:
                     # Сохраняем все дни (старое поведение)
                     employees_str = ', '.join(employees)
