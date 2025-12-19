@@ -365,10 +365,32 @@ class EmployeeManager:
         # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен)
         if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
             try:
+                # Загружаем администраторов для проверки
+                admin_ids = set()
+                if USE_POSTGRESQL:
+                    try:
+                        from database_sync import load_admins_from_db_sync
+                        admin_ids = load_admins_from_db_sync()
+                    except Exception:
+                        pass
+                
+                # Загружаем сотрудников для проверки username -> telegram_id
+                employees_data = {}
+                if USE_POSTGRESQL:
+                    try:
+                        from database_sync import load_employees_from_db_sync
+                        db_employees = load_employees_from_db_sync()
+                        for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
+                            if username:
+                                employees_data[username.lower()] = telegram_id
+                    except Exception:
+                        pass
+                
                 rows = self.sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
                 rows = filter_empty_rows(rows)
                 start_idx, _ = get_header_start_idx(rows, ['username', 'manual_name'])
                 
+                skipped_admins = []
                 for row in rows[start_idx:]:
                     if not row or len(row) < 2:
                         continue
@@ -376,9 +398,18 @@ class EmployeeManager:
                         username = row[0].strip().lower() if row[0] else None
                         manual_name = row[1].strip() if len(row) > 1 and row[1] else None
                         if username and manual_name:
+                            # Проверяем, не является ли пользователь администратором
+                            telegram_id = employees_data.get(username)
+                            if telegram_id and telegram_id in admin_ids:
+                                skipped_admins.append(username)
+                                logger.warning(f"Пропущен администратор @{username} при загрузке из Google Sheets (не должен быть в pending_employees)")
+                                continue
                             self.pending_employees[username] = manual_name
                     except Exception:
                         continue
+                
+                if skipped_admins:
+                    logger.warning(f"Пропущено администраторов при загрузке из Google Sheets: {len(skipped_admins)}")
                 
                 if self.pending_employees:
                     logger.info(f"Отложенные сотрудники загружены из Google Sheets: {len(self.pending_employees)} записей")
@@ -394,7 +425,29 @@ class EmployeeManager:
         if not os.path.exists(PENDING_EMPLOYEES_FILE):
             return
         
+        # Загружаем администраторов для проверки
+        admin_ids = set()
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import load_admins_from_db_sync
+                admin_ids = load_admins_from_db_sync()
+            except Exception:
+                pass
+        
+        # Загружаем сотрудников для проверки username -> telegram_id
+        employees_data = {}
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import load_employees_from_db_sync
+                db_employees = load_employees_from_db_sync()
+                for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
+                    if username:
+                        employees_data[username.lower()] = telegram_id
+            except Exception:
+                pass
+        
         try:
+            skipped_admins = []
             with open(PENDING_EMPLOYEES_FILE, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
@@ -404,9 +457,18 @@ class EmployeeManager:
                     if len(parts) == 2:
                         username = parts[0].strip().lower()
                         manual_name = parts[1].strip()
+                        # Проверяем, не является ли пользователь администратором
+                        telegram_id = employees_data.get(username)
+                        if telegram_id and telegram_id in admin_ids:
+                            skipped_admins.append(username)
+                            logger.warning(f"Пропущен администратор @{username} при загрузке из файла (не должен быть в pending_employees)")
+                            continue
                         self.pending_employees[username] = manual_name
         except Exception as e:
             logger.error(f"Ошибка загрузки отложенных записей: {e}")
+        
+        if skipped_admins:
+            logger.warning(f"Пропущено администраторов при загрузке из файла: {len(skipped_admins)}")
         
         # Синхронизируем с PostgreSQL (если загрузились из файла)
         if self.pending_employees:
