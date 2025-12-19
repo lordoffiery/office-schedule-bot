@@ -1178,6 +1178,19 @@ async def cmd_admin_add_employee(message: Message):
                 log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
                 return
             
+            # Проверяем, не является ли пользователь администратором
+            # Ищем telegram_id по username
+            found_telegram_id = employee_manager.get_telegram_id_by_username(username)
+            if found_telegram_id and admin_manager.is_admin(found_telegram_id):
+                response = (
+                    f"❌ Пользователь @{username} уже является администратором.\n\n"
+                    f"💡 Администраторы не должны быть в списке отложенных сотрудников.\n"
+                    f"Если нужно добавить администратора как сотрудника, сначала удалите его из списка администраторов."
+                )
+                await message.reply(response)
+                log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_add_employee", response)
+                return
+            
             # Сохраняем отложенную запись для использования при /start
             was_existing, old_name = employee_manager.add_pending_employee(username, name)
             if was_existing:
