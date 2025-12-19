@@ -1572,9 +1572,7 @@ async def cmd_admin_refresh_names(message: Message):
         
         # Сохраняем обновленный default_schedule
         if updated_default_count > 0:
-            for day_name, places_dict in default_schedule.items():
-                places_json = json.dumps(places_dict, ensure_ascii=False)
-                save_default_schedule_to_db_sync(day_name, places_json)
+            save_default_schedule_to_db_sync(default_schedule)
             response += f"✅ Обновлено {updated_default_count} имен в default_schedule\n"
         else:
             response += "ℹ️ В default_schedule все имена актуальны\n"
