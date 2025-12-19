@@ -565,7 +565,8 @@ class ScheduleManager:
         return default_schedule_list
     
     def save_schedule_for_week(self, week_start: datetime, schedule: Dict[str, List[str]], 
-                              only_changed_days: bool = False, employee_manager=None):
+                              only_changed_days: bool = False, employee_manager=None,
+                              changed_days: Optional[Set[str]] = None):
         """
         Сохранить расписание на неделю в PostgreSQL, Google Sheets и файлы
         
@@ -574,10 +575,12 @@ class ScheduleManager:
             schedule: Расписание в формате {day_name: [имена]}
             only_changed_days: Если True, сохранять только дни, отличающиеся от default_schedule
             employee_manager: Менеджер сотрудников для форматирования имен
+            changed_days: Множество имен дней, которые были изменены через requests (например, {'Понедельник', 'Вторник'})
         """
         from datetime import datetime as dt
         import pytz
         from config import TIMEZONE
+        from typing import Set, Optional
         
         week_dates = self.get_week_dates(week_start)
         timezone = pytz.timezone(TIMEZONE)
@@ -618,8 +621,18 @@ class ScheduleManager:
                 is_different = employees_sorted != default_employees_sorted
                 
                 if only_changed_days:
-                    # Сохраняем только если отличается от default
-                    if is_different:
+                    # Сохраняем только если:
+                    # 1. День был явно изменен через requests (если changed_days указан)
+                    # 2. ИЛИ день отличается от default (если changed_days не указан)
+                    should_save = False
+                    if changed_days is not None:
+                        # Сохраняем только дни, которые были изменены через requests
+                        should_save = day_name in changed_days and is_different
+                    else:
+                        # Старое поведение: сохраняем все отличающиеся дни
+                        should_save = is_different
+                    
+                    if should_save:
                         employees_str = ', '.join(employees)
                         try:
                             from database_sync import save_schedule_to_db_sync
@@ -689,8 +702,18 @@ class ScheduleManager:
             is_different = employees_sorted != default_employees_sorted
             
             if only_changed_days:
-                if is_different:
-                    # Сохраняем только если отличается от default
+                # Сохраняем только если:
+                # 1. День был явно изменен через requests (если changed_days указан)
+                # 2. ИЛИ день отличается от default (если changed_days не указан)
+                should_save = False
+                if changed_days is not None:
+                    # Сохраняем только дни, которые были изменены через requests
+                    should_save = day_name in changed_days and is_different
+                else:
+                    # Старое поведение: сохраняем все отличающиеся дни
+                    should_save = is_different
+                
+                if should_save:
                     schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
                     try:
                         with open(schedule_file, 'w', encoding='utf-8') as f:

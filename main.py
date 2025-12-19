@@ -1728,8 +1728,18 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     # Строим расписание на основе заявок (на основе default_schedule + requests)
                     schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
                     
+                    # Определяем, какие дни были изменены через requests
+                    changed_days = set()
+                    for req in requests:
+                        # Дни, которые были запрошены дополнительно или пропущены
+                        if req.get('days_requested'):
+                            changed_days.update(req['days_requested'])
+                        if req.get('days_skipped'):
+                            changed_days.update(req['days_skipped'])
+                    
                     # Сохраняем только измененные дни для будущих недель
-                    schedule_manager.save_schedule_for_week(week_start, schedule, only_changed_days=True, employee_manager=employee_manager)
+                    schedule_manager.save_schedule_for_week(week_start, schedule, only_changed_days=True, 
+                                                          employee_manager=employee_manager, changed_days=changed_days)
                     
                     total_rebuilt += 1
                     response += f"   ✅ Расписание перестроено (сохранены только измененные дни)\n"
