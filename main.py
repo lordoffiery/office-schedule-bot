@@ -1740,17 +1740,25 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     
                     # Определяем дни, которые реально отличаются от default
                     changed_days = set()
-                    for day_name in schedule.keys():
+                    final_schedule = {}  # Финальное расписание: измененные дни из schedule, остальные из default
+                    
+                    for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
                         schedule_employees = sorted([e.strip() for e in schedule.get(day_name, []) if e.strip()])
                         default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
+                        
                         if schedule_employees != default_employees:
+                            # День изменился - используем из schedule
                             changed_days.add(day_name)
+                            final_schedule[day_name] = schedule.get(day_name, [])
+                        else:
+                            # День не изменился - используем из default
+                            final_schedule[day_name] = formatted_default.get(day_name, [])
                     
                     logger.info(f"📋 Неделя {week_str}: определены реально измененные дни (отличаются от default): {changed_days}")
-                    logger.info(f"📋 Неделя {week_str}: построенное расписание содержит дни: {list(schedule.keys())}")
+                    logger.info(f"📋 Неделя {week_str}: финальное расписание содержит дни: {list(final_schedule.keys())}")
                     
-                    # Сохраняем только измененные дни для будущих недель
-                    schedule_manager.save_schedule_for_week(week_start, schedule, only_changed_days=True, 
+                    # Сохраняем только измененные дни для будущих недель (используем final_schedule)
+                    schedule_manager.save_schedule_for_week(week_start, final_schedule, only_changed_days=True, 
                                                           employee_manager=employee_manager, changed_days=changed_days)
                     
                     total_rebuilt += 1
