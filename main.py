@@ -1033,12 +1033,13 @@ async def cmd_add_day(message: Message):
 
 @dp.message(Command("full_schedule"))
 async def cmd_full_schedule(message: Message):
-    """Показать полное расписание на дату (только для админов)"""
+    """Показать полное расписание на дату (доступно всем сотрудникам)"""
     user_id = message.from_user.id
     user_info = get_user_info(message)
     
-    if not admin_manager.is_admin(user_id):
-        response = "Эта команда доступна только администраторам"
+    # Проверяем, зарегистрирован ли пользователь
+    if not employee_manager.is_registered(user_id):
+        response = "Вы не зарегистрированы. Используйте /start"
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/full_schedule", response)
         return
