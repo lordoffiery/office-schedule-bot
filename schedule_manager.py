@@ -1460,8 +1460,17 @@ class ScheduleManager:
                 employee_to_place[employee_name] = assigned_place
                 place_to_employee[assigned_place] = employee_name
                 # Назначаем место сотруднику во все его дни
+                # Сначала удаляем сотрудника из всех мест, где он мог быть (из default_schedule)
                 for day in days_list:
                     if day in schedule:
+                        # Удаляем сотрудника из всех мест этого дня, где он мог быть
+                        for place_key in list(schedule[day].keys()):
+                            existing_name = schedule[day].get(place_key, '')
+                            if existing_name:
+                                plain_existing = self.get_plain_name_from_formatted(existing_name)
+                                if plain_existing == employee_name:
+                                    schedule[day][place_key] = ''
+                        # Назначаем сотрудника на фиксированное место
                         schedule[day][assigned_place] = employee_name
         
         return employee_to_place
@@ -1498,14 +1507,20 @@ class ScheduleManager:
                 if place_key not in schedule[day_name]:
                     schedule[day_name][place_key] = ''
         
-        # Заполняем расписание всеми сотрудниками из default_schedule
+        # Шаг 1: Назначаем фиксированные места сотрудникам на основе приоритета
+        # НЕ заполняем schedule из default_schedule перед этим, чтобы избежать дубликатов
+        # _assign_fixed_places сам заполнит schedule сотрудниками на их фиксированные места
+        employee_to_place = self._assign_fixed_places(default_schedule, schedule, employee_manager)
+        
+        # После назначения фиксированных мест заполняем оставшиеся места из default_schedule
+        # Только те места, которые не были назначены через _assign_fixed_places
         for day_name, places_dict in default_schedule.items():
             for place_key, name in places_dict.items():
-                if name:  # Если место занято
-                    schedule[day_name][place_key] = name
-        
-        # Шаг 1: Назначаем фиксированные места сотрудникам на основе приоритета
-        employee_to_place = self._assign_fixed_places(default_schedule, schedule, employee_manager)
+                if name:  # Если место занято в default_schedule
+                    # Проверяем, не назначен ли уже сотрудник на это место через _assign_fixed_places
+                    if not schedule[day_name].get(place_key):
+                        # Место свободно - заполняем из default_schedule
+                        schedule[day_name][place_key] = name
         
         # Шаг 2: Применяем заявки (skip_day, add_day)
         # Создаем словарь заявок по сотрудникам
