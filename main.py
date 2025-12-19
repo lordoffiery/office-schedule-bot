@@ -1728,16 +1728,25 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     # Строим расписание на основе заявок (на основе default_schedule + requests)
                     schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
                     
-                    # Определяем, какие дни были изменены через requests
-                    changed_days = set()
-                    for req in requests:
-                        # Дни, которые были запрошены дополнительно или пропущены
-                        if req.get('days_requested'):
-                            changed_days.update(req['days_requested'])
-                        if req.get('days_skipped'):
-                            changed_days.update(req['days_skipped'])
+                    # Определяем, какие дни реально изменились по сравнению с default_schedule
+                    # Сравниваем построенное расписание с default_schedule
+                    default_schedule = schedule_manager.load_default_schedule()
+                    default_schedule_list = schedule_manager._default_schedule_to_list(default_schedule)
                     
-                    logger.info(f"📋 Неделя {week_str}: определены измененные дни через requests: {changed_days}")
+                    # Форматируем имена в default_schedule для сравнения
+                    formatted_default = {}
+                    for day, employees in default_schedule_list.items():
+                        formatted_default[day] = [employee_manager.format_employee_name(emp) for emp in employees]
+                    
+                    # Определяем дни, которые реально отличаются от default
+                    changed_days = set()
+                    for day_name in schedule.keys():
+                        schedule_employees = sorted([e.strip() for e in schedule.get(day_name, []) if e.strip()])
+                        default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
+                        if schedule_employees != default_employees:
+                            changed_days.add(day_name)
+                    
+                    logger.info(f"📋 Неделя {week_str}: определены реально измененные дни (отличаются от default): {changed_days}")
                     logger.info(f"📋 Неделя {week_str}: построенное расписание содержит дни: {list(schedule.keys())}")
                     
                     # Сохраняем только измененные дни для будущих недель
