@@ -1722,7 +1722,7 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
                     
                     # Сохраняем расписание для недели
-                    schedule_manager.save_schedule_for_week(week_start, schedule, employee_manager)
+                    schedule_manager.save_schedule_for_week(week_start, schedule)
                     
                     total_rebuilt += 1
                     response += f"   ✅ Расписание перестроено\n"
