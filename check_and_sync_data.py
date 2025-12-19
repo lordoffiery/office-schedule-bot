@@ -144,6 +144,16 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать отложенных сотрудников"""
     print("\n⏳ Проверка отложенных сотрудников...")
     
+    # Загружаем администраторов и сотрудников для проверки
+    db_admins = load_admins_from_db_sync()
+    db_employees = load_employees_from_db_sync()
+    
+    # Создаем словарь username -> telegram_id из сотрудников
+    username_to_telegram_id = {}
+    for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
+        if username:
+            username_to_telegram_id[username.lower()] = telegram_id
+    
     # Загружаем из Google Sheets
     rows = sheets_manager.read_all_rows(SHEET_PENDING_EMPLOYEES)
     if not rows:
@@ -154,18 +164,42 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
         if isinstance(header_idx, tuple):
             header_idx = header_idx[0]
         sheets_pending = {}
+        skipped_admins = []
         for row in rows[header_idx + 1:]:
             if not row or len(row) < 2:
                 continue
             username = row[0].strip().lower().lstrip('@')
             manual_name = row[1].strip() if len(row) > 1 else ''
             if username:
+                # Проверяем, не является ли пользователь администратором
+                telegram_id = username_to_telegram_id.get(username)
+                if telegram_id and telegram_id in db_admins:
+                    skipped_admins.append(username)
+                    print(f"   ⚠️ Пропущен администратор @{username} (не должен быть в pending_employees)")
+                    continue
                 sheets_pending[username] = manual_name
+        
+        if skipped_admins:
+            print(f"   ⚠️ Пропущено администраторов: {len(skipped_admins)}")
     
     # Загружаем из PostgreSQL
     db_pending = load_pending_employees_from_db_sync()
     
-    print(f"   Google Sheets: {len(sheets_pending)} отложенных сотрудников")
+    # Удаляем администраторов из PostgreSQL pending_employees
+    admins_in_pending = []
+    for username in list(db_pending.keys()):
+        telegram_id = username_to_telegram_id.get(username)
+        if telegram_id and telegram_id in db_admins:
+            admins_in_pending.append(username)
+            remove_pending_employee_from_db_sync(username)
+            print(f"   🗑️ Удален администратор @{username} из pending_employees в PostgreSQL")
+    
+    if admins_in_pending:
+        print(f"   🗑️ Удалено администраторов из PostgreSQL: {len(admins_in_pending)}")
+        # Перезагружаем после удаления
+        db_pending = load_pending_employees_from_db_sync()
+    
+    print(f"   Google Sheets: {len(sheets_pending)} отложенных сотрудников (после фильтрации администраторов)")
     print(f"   PostgreSQL: {len(db_pending)} отложенных сотрудников")
     
     if sheets_pending != db_pending:
@@ -177,7 +211,7 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
         for username in db_pending:
             if username not in sheets_pending:
                 remove_pending_employee_from_db_sync(username)
-        # Добавляем/обновляем тех, кто есть в Google Sheets
+        # Добавляем/обновляем тех, кто есть в Google Sheets (уже без администраторов)
         for username, manual_name in sheets_pending.items():
             save_pending_employee_to_db_sync(username, manual_name)
         print(f"   ✅ Синхронизация завершена")

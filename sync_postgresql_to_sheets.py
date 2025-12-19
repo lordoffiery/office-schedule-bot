@@ -98,11 +98,36 @@ def sync_pending_employees_to_sheets(sheets_manager: GoogleSheetsManager):
     """Синхронизировать отложенных сотрудников из PostgreSQL в Google Sheets"""
     print("\n⏳ Синхронизация отложенных сотрудников...")
     
+    # Загружаем администраторов и сотрудников для проверки
+    from database_sync import load_admins_from_db_sync, load_employees_from_db_sync
+    db_admins = load_admins_from_db_sync()
+    db_employees = load_employees_from_db_sync()
+    
+    # Создаем словарь username -> telegram_id из сотрудников
+    username_to_telegram_id = {}
+    for telegram_id, (manual_name, telegram_name, username, approved) in db_employees.items():
+        if username:
+            username_to_telegram_id[username.lower()] = telegram_id
+    
     # Загружаем из PostgreSQL
     db_pending = load_pending_employees_from_db_sync()
     
-    if not db_pending:
-        print("   ⚠️ В PostgreSQL нет отложенных сотрудников")
+    # Фильтруем администраторов
+    filtered_pending = {}
+    skipped_admins = []
+    for username, manual_name in db_pending.items():
+        telegram_id = username_to_telegram_id.get(username)
+        if telegram_id and telegram_id in db_admins:
+            skipped_admins.append(username)
+            print(f"   ⚠️ Пропущен администратор @{username} (не должен быть в pending_employees)")
+            continue
+        filtered_pending[username] = manual_name
+    
+    if skipped_admins:
+        print(f"   ⚠️ Пропущено администраторов: {len(skipped_admins)}")
+    
+    if not filtered_pending:
+        print("   ⚠️ В PostgreSQL нет отложенных сотрудников (после фильтрации администраторов)")
         # Очищаем Google Sheets
         try:
             sheets_manager.write_rows(SHEET_PENDING_EMPLOYEES, [['username', 'manual_name']], clear_first=True)
@@ -113,13 +138,13 @@ def sync_pending_employees_to_sheets(sheets_manager: GoogleSheetsManager):
     
     # Формируем строки для Google Sheets
     rows = [['username', 'manual_name']]  # Заголовок
-    for username, manual_name in sorted(db_pending.items()):
+    for username, manual_name in sorted(filtered_pending.items()):
         rows.append([username, manual_name])
     
     # Сохраняем в Google Sheets
     try:
         sheets_manager.write_rows(SHEET_PENDING_EMPLOYEES, rows, clear_first=True)
-        print(f"   ✅ Синхронизировано {len(db_pending)} отложенных сотрудников")
+        print(f"   ✅ Синхронизировано {len(filtered_pending)} отложенных сотрудников")
     except Exception as e:
         print(f"   ❌ Ошибка синхронизации отложенных сотрудников: {e}")
 
