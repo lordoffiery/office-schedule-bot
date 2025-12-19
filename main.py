@@ -1748,8 +1748,7 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                         default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
                         
                         if schedule_employees != default_employees:
-                            # День изменился после применения requests - сохраняем его
-                            changed_days.add(day_name)
+                            # День изменился после применения requests - дополняем пустые места из default
                             schedule_day = schedule.get(day_name, [])
                             default_day = formatted_default.get(day_name, [])
                             
@@ -1767,11 +1766,19 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                                     if len(schedule_day) >= len(default_day):
                                         break
                             
-                            final_schedule[day_name] = schedule_day
+                            # После дополнения проверяем, отличается ли от default
+                            final_employees = sorted([e.strip() for e in schedule_day if e.strip()])
+                            
+                            if final_employees != default_employees:
+                                # После дополнения все еще отличается - сохраняем
+                                changed_days.add(day_name)
+                                final_schedule[day_name] = schedule_day
+                            else:
+                                # После дополнения совпадает с default - не сохраняем (будет удален из schedules)
+                                logger.info(f"📋 Неделя {week_str}: день {day_name} после дополнения совпадает с default - не сохраняем")
                         else:
                             # День не изменился после применения requests - не сохраняем (будет удален из schedules)
-                            # Не добавляем в final_schedule, чтобы он был удален из schedules
-                            pass
+                            logger.info(f"📋 Неделя {week_str}: день {day_name} не изменился после применения requests - не сохраняем")
                     
                     logger.info(f"📋 Неделя {week_str}: определены измененные дни после применения requests (отличаются от default): {changed_days}")
                     logger.info(f"📋 Неделя {week_str}: финальное расписание содержит дней: {len(final_schedule)}")
