@@ -1720,6 +1720,12 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
             # Загружаем заявки на эту неделю
             requests = schedule_manager.load_requests_for_week(week_start)
             
+            # Логируем заявки для отладки
+            logger.info(f"📋 Неделя {week_str}: загружено {len(requests) if requests else 0} заявок")
+            if requests:
+                for req in requests:
+                    logger.info(f"  - {req['employee_name']}: запрошены дни {req['days_requested']}, пропущены дни {req['days_skipped']}")
+            
             if requests:
                 response += f"📅 Неделя {week_str} ({len(requests)} заявок)...\n"
                 await update_status(response)
@@ -1734,9 +1740,17 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     for day, employees in default_schedule_list.items():
                         formatted_default[day] = [employee_manager.format_employee_name(emp) for emp in employees]
                     
+                    logger.info(f"📋 Неделя {week_str}: default_schedule содержит:")
+                    for day, emps in formatted_default.items():
+                        logger.info(f"  {day}: {len(emps)} сотрудников - {', '.join(emps[:3])}...")
+                    
                     # Строим расписание на основе заявок (на основе default_schedule + requests)
                     # Игнорируем то, что уже есть в schedules
                     schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
+                    
+                    logger.info(f"📋 Неделя {week_str}: построенное расписание после применения requests:")
+                    for day, emps in schedule.items():
+                        logger.info(f"  {day}: {len(emps)} сотрудников - {', '.join(emps[:3])}...")
                     
                     # Определяем дни, которые реально отличаются от default после применения requests
                     changed_days = set()
@@ -1747,6 +1761,11 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                         schedule_employees = sorted([e.strip() for e in schedule.get(day_name, []) if e.strip()])
                         default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
                         
+                        logger.info(f"📋 Неделя {week_str}: день {day_name}")
+                        logger.info(f"  schedule: {schedule_employees}")
+                        logger.info(f"  default: {default_employees}")
+                        logger.info(f"  отличаются: {schedule_employees != default_employees}")
+                        
                         if schedule_employees != default_employees:
                             # День изменился после применения requests - дополняем пустые места из default
                             schedule_day = schedule.get(day_name, [])
@@ -1754,6 +1773,8 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                             
                             # Создаем множество имен из schedule для быстрой проверки
                             schedule_names = set([e.strip() for e in schedule_day if e.strip()])
+                            
+                            logger.info(f"  До дополнения: {len(schedule_day)} сотрудников в schedule, {len(default_day)} в default")
                             
                             # Дополняем пустые места из default до полного расписания
                             # Добавляем тех, кого нет в schedule, до количества мест в default
@@ -1769,16 +1790,20 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                             # После дополнения проверяем, отличается ли от default
                             final_employees = sorted([e.strip() for e in schedule_day if e.strip()])
                             
+                            logger.info(f"  После дополнения: {final_employees}")
+                            logger.info(f"  После дополнения отличается от default: {final_employees != default_employees}")
+                            
                             if final_employees != default_employees:
                                 # После дополнения все еще отличается - сохраняем
                                 changed_days.add(day_name)
                                 final_schedule[day_name] = schedule_day
+                                logger.info(f"  ✅ День {day_name} будет сохранен")
                             else:
                                 # После дополнения совпадает с default - не сохраняем (будет удален из schedules)
-                                logger.info(f"📋 Неделя {week_str}: день {day_name} после дополнения совпадает с default - не сохраняем")
+                                logger.info(f"  ❌ День {day_name} после дополнения совпадает с default - не сохраняем")
                         else:
                             # День не изменился после применения requests - не сохраняем (будет удален из schedules)
-                            logger.info(f"📋 Неделя {week_str}: день {day_name} не изменился после применения requests - не сохраняем")
+                            logger.info(f"  ❌ День {day_name} не изменился после применения requests - не сохраняем")
                     
                     logger.info(f"📋 Неделя {week_str}: определены измененные дни после применения requests (отличаются от default): {changed_days}")
                     logger.info(f"📋 Неделя {week_str}: финальное расписание содержит дней: {len(final_schedule)}")
