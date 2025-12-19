@@ -526,8 +526,35 @@ class EmployeeManager:
             (was_existing, old_name): 
             - was_existing: True если запись уже существовала, False если новая
             - old_name: старое имя, если запись существовала, иначе None
+        
+        Raises:
+            ValueError: если пользователь является администратором
         """
         username_lower = username.lower().lstrip('@')
+        
+        # Проверяем, не является ли пользователь администратором
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import load_admins_from_db_sync, load_employees_from_db_sync
+                admin_ids = load_admins_from_db_sync()
+                db_employees = load_employees_from_db_sync()
+                
+                # Ищем telegram_id по username
+                telegram_id = None
+                for tid, (mname, tname, uname, approved) in db_employees.items():
+                    if uname and uname.lower() == username_lower:
+                        telegram_id = tid
+                        break
+                
+                if telegram_id and telegram_id in admin_ids:
+                    logger.warning(f"Попытка добавить администратора @{username_lower} в pending_employees - отклонено")
+                    raise ValueError(f"Пользователь @{username_lower} является администратором и не может быть добавлен в pending_employees")
+            except ValueError:
+                raise  # Пробрасываем ValueError дальше
+            except Exception as e:
+                logger.warning(f"Ошибка проверки администратора при добавлении в pending_employees: {e}")
+                # Продолжаем, если проверка не удалась
+        
         was_existing = username_lower in self.pending_employees
         old_name = self.pending_employees.get(username_lower) if was_existing else None
         self.pending_employees[username_lower] = manual_name
