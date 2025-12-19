@@ -5,6 +5,7 @@ import asyncio
 import os
 import logging
 import threading
+import json
 from datetime import datetime, timedelta
 from typing import Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -379,6 +380,8 @@ async def cmd_help(message: Message):
             "   Дни: Понедельник, Вторник, Среда, Четверг, Пятница\n\n"
             "/admin_refresh_schedules - Обновить имена сотрудников в расписаниях (синхронизация с employees)\n"
             "   Используйте после ручного добавления сотрудников в Google Sheets\n\n"
+            "/admin_refresh_names - Принудительно обновить имена сотрудников в расписаниях (добавить username)\n"
+            "   Обновляет имена в default_schedule и schedules за последние 60 дней\n\n"
             "/admin_sync_from_sheets - Синхронизировать данные из Google Sheets в PostgreSQL\n"
             "   Используйте после ручного изменения данных в Google Sheets"
         )
