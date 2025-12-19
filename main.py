@@ -783,7 +783,26 @@ async def process_skip_day(date: datetime, employee_name: str, user_id: int, emp
         schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
         
         # Автоматически перестраиваем расписания для этой недели в фоне
-        asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
+        # ТОЛЬКО если пропущенный день был в default_schedule для этого сотрудника
+        # (для консистентности - если сотрудник пропускает день, которого у него нет в default, это не влияет на расписание)
+        default_schedule = schedule_manager.load_default_schedule()
+        employee_was_in_default = False
+        for day_n, places_dict in default_schedule.items():
+            if day_n == day_name:
+                for place_key, name in places_dict.items():
+                    plain_name = schedule_manager.get_plain_name_from_formatted(name)
+                    if plain_name == employee_name:
+                        employee_was_in_default = True
+                        break
+                if employee_was_in_default:
+                    break
+        
+        if employee_was_in_default:
+            # Сотрудник был в default_schedule на этот день - запускаем перестройку
+            asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
+            logger.info(f"Запущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} (сотрудник {employee_name} был в default_schedule на {day_name})")
+        else:
+            logger.info(f"Пропущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} (сотрудник {employee_name} НЕ был в default_schedule на {day_name})")
         
         return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков на следующую неделю"
 
@@ -940,7 +959,26 @@ async def process_add_day(date: datetime, employee_name: str, user_id: int, empl
         schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
         
         # Автоматически перестраиваем расписания для этой недели в фоне
-        asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
+        # ТОЛЬКО если запрошенный день был в default_schedule для этого сотрудника
+        # Иначе сотрудник может запросить день, которого у него нет в расписании, и это будет применено до воскресенья
+        default_schedule = schedule_manager.load_default_schedule()
+        employee_was_in_default = False
+        for day_n, places_dict in default_schedule.items():
+            if day_n == day_name:
+                for place_key, name in places_dict.items():
+                    plain_name = schedule_manager.get_plain_name_from_formatted(name)
+                    if plain_name == employee_name:
+                        employee_was_in_default = True
+                        break
+                if employee_was_in_default:
+                    break
+        
+        if employee_was_in_default:
+            # Сотрудник был в default_schedule на этот день - запускаем перестройку
+            asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
+            logger.info(f"Запущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} (сотрудник {employee_name} был в default_schedule на {day_name})")
+        else:
+            logger.info(f"Пропущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} (сотрудник {employee_name} НЕ был в default_schedule на {day_name})")
         
         return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список запрошенных дней на следующую неделю"
 
