@@ -1538,7 +1538,17 @@ async def cmd_admin_refresh_names(message: Message):
         return
     
     response = "🔄 Начинаю обновление имен сотрудников в расписаниях...\n\n"
-    await message.reply(response)
+    # Используем answer() вместо reply(), чтобы можно было редактировать сообщение
+    status_message = await message.answer(response)
+    
+    async def update_status(text: str):
+        """Безопасное обновление статуса сообщения"""
+        try:
+            await status_message.edit_text(text)
+        except Exception as e:
+            # Если не удалось отредактировать (сообщение удалено или изменено), отправляем новое
+            logger.debug(f"Не удалось отредактировать сообщение: {e}")
+            pass
     
     try:
         from database_sync import (
@@ -1553,7 +1563,7 @@ async def cmd_admin_refresh_names(message: Message):
         
         # 1. Обновляем default_schedule
         response += "📋 Обновляю расписание по умолчанию...\n"
-        await message.edit_text(response)
+        await update_status(response)
         
         default_schedule = load_default_schedule_from_db_sync()
         if default_schedule:
@@ -1577,11 +1587,11 @@ async def cmd_admin_refresh_names(message: Message):
         else:
             response += "ℹ️ В default_schedule все имена актуальны\n"
         
-        await message.edit_text(response)
+        await update_status(response)
         
         # 2. Обновляем schedules (последние 60 дней)
         response += "\n📅 Обновляю расписания на даты...\n"
-        await message.edit_text(response)
+        await update_status(response)
         
         conn = _get_connection()
         if conn:
@@ -1600,7 +1610,7 @@ async def cmd_admin_refresh_names(message: Message):
                     
                     dates = [row['date'] for row in cur.fetchall()]
                     response += f"   Найдено {len(dates)} дат для проверки\n"
-                    await message.edit_text(response)
+                    await update_status(response)
                     
                     for schedule_date in dates:
                         date_str = schedule_date.strftime('%Y-%m-%d')
@@ -1642,15 +1652,19 @@ async def cmd_admin_refresh_names(message: Message):
         
         # Синхронизируем с Google Sheets
         response += "\n\n🔄 Синхронизирую с Google Sheets..."
-        await message.edit_text(response)
+        await update_status(response)
         await sync_postgresql_to_sheets()
         
         response += "\n✅ Синхронизация завершена!"
-        await message.edit_text(response)
+        await update_status(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", response)
     except Exception as e:
         error_response = f"❌ Ошибка при обновлении имен: {e}"
-        await message.edit_text(error_response)
+        try:
+            await status_message.edit_text(error_response)
+        except:
+            # Если не удалось отредактировать, отправляем новое сообщение
+            await message.answer(error_response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", error_response)
         logger.error(f"Ошибка обновления имен в расписаниях: {e}", exc_info=True)
 
