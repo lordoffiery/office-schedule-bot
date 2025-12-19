@@ -1513,14 +1513,8 @@ class ScheduleManager:
             # Получаем фиксированное место сотрудника (если есть)
             fixed_place = employee_to_place.get(employee_name)
             
-            # Удаляем сотрудника из пропущенных дней
-            for day in days_skipped:
-                if day in schedule and fixed_place:
-                    # Освобождаем место
-                    if fixed_place in schedule[day]:
-                        schedule[day][fixed_place] = ''
-            
-            # Добавляем сотрудника в запрошенные дни (которые не в пропусках)
+            # Сначала добавляем сотрудника в запрошенные дни
+            # Это нужно сделать до удаления, чтобы знать, какие дни были добавлены через requests
             for day in days_requested:
                 if day in schedule and day not in days_skipped:
                     # Проверяем, есть ли уже сотрудник в расписании
@@ -1542,6 +1536,28 @@ class ScheduleManager:
                             if free_place:
                                 schedule[day][free_place] = employee_name
                         # Если места нет, сотрудник не добавляется (работает удаленно)
+            
+            # Удаляем сотрудника из пропущенных дней
+            # Важно: удаляем только если день был в days_requested (т.е. сотрудник был добавлен через requests)
+            # Если сотрудник был в default_schedule на этот день, но не запрашивал его через requests,
+            # то days_skipped не должен его удалять
+            for day in days_skipped:
+                if day in schedule:
+                    # Проверяем, был ли этот день в days_requested (т.е. сотрудник был добавлен через requests)
+                    # Если день был в days_requested, значит сотрудник был добавлен через requests, и его можно удалить
+                    # Если день не был в days_requested, значит сотрудник был в default_schedule, и его не удаляем
+                    if day in days_requested:
+                        # День был запрошен через requests - удаляем сотрудника
+                        if fixed_place and fixed_place in schedule[day]:
+                            # Освобождаем место
+                            schedule[day][fixed_place] = ''
+                        else:
+                            # Ищем сотрудника в расписании и удаляем
+                            place_key = self._find_employee_in_places(schedule[day], employee_name)
+                            if place_key:
+                                schedule[day][place_key] = ''
+                    # Если день не был в days_requested, значит сотрудник был в default_schedule
+                    # и days_skipped не должен его удалять (сотрудник остается в default_schedule)
         
         # Конвертируем обратно в формат списка для вывода
         formatted_schedule = {}
