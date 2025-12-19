@@ -1757,15 +1757,16 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     final_schedule = {}  # Финальное расписание: измененные дни из schedule, остальные из default
                     
                     for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                        # Сравниваем построенное расписание с default_schedule
+                        # Сравниваем построенное расписание с default_schedule ДО дополнения
                         schedule_employees = sorted([e.strip() for e in schedule.get(day_name, []) if e.strip()])
                         default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
                         
                         logger.info(f"📋 Неделя {week_str}: день {day_name}")
-                        logger.info(f"  schedule: {schedule_employees}")
+                        logger.info(f"  schedule до дополнения: {schedule_employees}")
                         logger.info(f"  default: {default_employees}")
-                        logger.info(f"  отличаются: {schedule_employees != default_employees}")
+                        logger.info(f"  отличаются до дополнения: {schedule_employees != default_employees}")
                         
+                        # Если день изменился после применения requests (до дополнения), сохраняем его
                         if schedule_employees != default_employees:
                             # День изменился после применения requests - дополняем пустые места из default
                             schedule_day = schedule.get(day_name, [])
@@ -1787,20 +1788,14 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                                     if len(schedule_day) >= len(default_day):
                                         break
                             
-                            # После дополнения проверяем, отличается ли от default
+                            # Сохраняем день, так как он изменился после применения requests
+                            # Даже если после дополнения он совпадает с default, изменения из requests должны быть сохранены
+                            changed_days.add(day_name)
+                            final_schedule[day_name] = schedule_day
+                            
                             final_employees = sorted([e.strip() for e in schedule_day if e.strip()])
-                            
                             logger.info(f"  После дополнения: {final_employees}")
-                            logger.info(f"  После дополнения отличается от default: {final_employees != default_employees}")
-                            
-                            if final_employees != default_employees:
-                                # После дополнения все еще отличается - сохраняем
-                                changed_days.add(day_name)
-                                final_schedule[day_name] = schedule_day
-                                logger.info(f"  ✅ День {day_name} будет сохранен")
-                            else:
-                                # После дополнения совпадает с default - не сохраняем (будет удален из schedules)
-                                logger.info(f"  ❌ День {day_name} после дополнения совпадает с default - не сохраняем")
+                            logger.info(f"  ✅ День {day_name} будет сохранен (изменился после применения requests)")
                         else:
                             # День не изменился после применения requests - не сохраняем (будет удален из schedules)
                             logger.info(f"  ❌ День {day_name} не изменился после применения requests - не сохраняем")
