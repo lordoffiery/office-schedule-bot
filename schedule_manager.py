@@ -621,13 +621,13 @@ class ScheduleManager:
                 
                 if only_changed_days:
                     # Сохраняем только если:
-                    # 1. День был явно изменен через requests (если changed_days указан)
+                    # 1. День был явно изменен через requests (если changed_days указан) - сохраняем ВСЕГДА, даже если совпадает с default
                     # 2. ИЛИ день отличается от default (если changed_days не указан)
                     should_save = False
                     if changed_days is not None:
-                        # Сохраняем только дни, которые были изменены через requests
+                        # Сохраняем все дни, которые были изменены через requests (даже если результат совпадает с default)
                         day_in_changed = day_name in changed_days
-                        should_save = day_in_changed and is_different
+                        should_save = day_in_changed  # Убираем проверку is_different - сохраняем все измененные дни
                         logger.info(f"Проверка дня {date_str} ({day_name}): в changed_days={day_in_changed}, отличается от default={is_different}, should_save={should_save}")
                         if day_in_changed:
                             logger.info(f"  changed_days содержит: {changed_days}")
@@ -715,12 +715,12 @@ class ScheduleManager:
             
             if only_changed_days:
                 # Сохраняем только если:
-                # 1. День был явно изменен через requests (если changed_days указан)
+                # 1. День был явно изменен через requests (если changed_days указан) - сохраняем ВСЕГДА, даже если совпадает с default
                 # 2. ИЛИ день отличается от default (если changed_days не указан)
                 should_save = False
                 if changed_days is not None:
-                    # Сохраняем только дни, которые были изменены через requests
-                    should_save = day_name in changed_days and is_different
+                    # Сохраняем все дни, которые были изменены через requests (даже если результат совпадает с default)
+                    should_save = day_name in changed_days  # Убираем проверку is_different
                 else:
                     # Старое поведение: сохраняем все отличающиеся дни
                     should_save = is_different
