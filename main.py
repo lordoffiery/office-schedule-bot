@@ -1522,6 +1522,138 @@ async def cmd_admin_set_default_schedule(message: Message):
     await sync_postgresql_to_sheets()
 
 
+@dp.message(Command("admin_refresh_names"))
+async def cmd_admin_refresh_names(message: Message):
+    """Принудительно обновить имена сотрудников в расписаниях (добавить username)"""
+    user_id = message.from_user.id
+    user_info = get_user_info(message)
+    
+    if not admin_manager.is_admin(user_id):
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", response)
+        return
+    
+    response = "🔄 Начинаю обновление имен сотрудников в расписаниях...\n\n"
+    await message.reply(response)
+    
+    try:
+        from database_sync import (
+            load_default_schedule_from_db_sync, save_default_schedule_to_db_sync,
+            load_schedule_from_db_sync, save_schedule_to_db_sync, _get_connection
+        )
+        from psycopg2.extras import RealDictCursor
+        from datetime import datetime, timedelta
+        
+        updated_default_count = 0
+        updated_schedules_count = 0
+        
+        # 1. Обновляем default_schedule
+        response += "📋 Обновляю расписание по умолчанию...\n"
+        await message.edit_text(response)
+        
+        default_schedule = load_default_schedule_from_db_sync()
+        if default_schedule:
+            for day_name, places_dict in default_schedule.items():
+                for place_key, name in places_dict.items():
+                    if name:  # Если место не пустое
+                        plain_name = schedule_manager.get_plain_name_from_formatted(name)
+                        # Ищем сотрудника по имени
+                        telegram_id = employee_manager.get_employee_id(plain_name)
+                        if telegram_id:
+                            formatted_name = employee_manager.format_employee_name_by_id(telegram_id)
+                            # Если имя изменилось (добавился username), обновляем
+                            if formatted_name != name:
+                                default_schedule[day_name][place_key] = formatted_name
+                                updated_default_count += 1
+        
+        # Сохраняем обновленный default_schedule
+        if updated_default_count > 0:
+            for day_name, places_dict in default_schedule.items():
+                places_json = json.dumps(places_dict, ensure_ascii=False)
+                save_default_schedule_to_db_sync(day_name, places_json)
+            response += f"✅ Обновлено {updated_default_count} имен в default_schedule\n"
+        else:
+            response += "ℹ️ В default_schedule все имена актуальны\n"
+        
+        await message.edit_text(response)
+        
+        # 2. Обновляем schedules (последние 60 дней)
+        response += "\n📅 Обновляю расписания на даты...\n"
+        await message.edit_text(response)
+        
+        conn = _get_connection()
+        if conn:
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # Получаем все даты из schedules за последние 60 дней
+                    today = datetime.now().date()
+                    start_date = today - timedelta(days=30)
+                    end_date = today + timedelta(days=30)
+                    
+                    cur.execute("""
+                        SELECT DISTINCT date FROM schedules 
+                        WHERE date >= %s AND date <= %s
+                        ORDER BY date
+                    """, (start_date, end_date))
+                    
+                    dates = [row['date'] for row in cur.fetchall()]
+                    response += f"   Найдено {len(dates)} дат для проверки\n"
+                    await message.edit_text(response)
+                    
+                    for schedule_date in dates:
+                        date_str = schedule_date.strftime('%Y-%m-%d')
+                        db_schedule = load_schedule_from_db_sync(date_str)
+                        
+                        if db_schedule:
+                            for day_name, employees_str in db_schedule.items():
+                                if employees_str:
+                                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                    updated_employees = []
+                                    row_updated = False
+                                    
+                                    for emp in employees:
+                                        # Извлекаем простое имя из отформатированного (если есть)
+                                        plain_name = schedule_manager.get_plain_name_from_formatted(emp)
+                                        # Ищем сотрудника по имени
+                                        telegram_id = employee_manager.get_employee_id(plain_name)
+                                        if telegram_id:
+                                            formatted_name = employee_manager.format_employee_name_by_id(telegram_id)
+                                            # Если имя изменилось (добавился username), обновляем
+                                            if formatted_name != emp:
+                                                updated_employees.append(formatted_name)
+                                                row_updated = True
+                                                updated_schedules_count += 1
+                                            else:
+                                                updated_employees.append(emp)
+                                        else:
+                                            # Сотрудник не найден, оставляем как есть
+                                            updated_employees.append(emp)
+                                    
+                                    if row_updated:
+                                        new_employees_str = ', '.join(updated_employees)
+                                        save_schedule_to_db_sync(date_str, day_name, new_employees_str)
+            finally:
+                conn.close()
+        
+        response += f"✅ Обновлено {updated_schedules_count} имен в schedules\n"
+        response += f"\n📊 Итого обновлено: {updated_default_count + updated_schedules_count} имен"
+        
+        # Синхронизируем с Google Sheets
+        response += "\n\n🔄 Синхронизирую с Google Sheets..."
+        await message.edit_text(response)
+        await sync_postgresql_to_sheets()
+        
+        response += "\n✅ Синхронизация завершена!"
+        await message.edit_text(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", response)
+    except Exception as e:
+        error_response = f"❌ Ошибка при обновлении имен: {e}"
+        await message.edit_text(error_response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_refresh_names", error_response)
+        logger.error(f"Ошибка обновления имен в расписаниях: {e}", exc_info=True)
+
+
 @dp.message(Command("admin_refresh_schedules"))
 async def cmd_admin_refresh_schedules(message: Message):
     """Обновить имена сотрудников в schedules и default_schedule (только для админов)"""
