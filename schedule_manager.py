@@ -695,6 +695,17 @@ class ScheduleManager:
         #         logger.warning(f"Ошибка сохранения расписания недели в Google Sheets: {e}")
         
         # Сохраняем в файлы (только измененные дни, если only_changed_days=True)
+        # Собираем существующие файлы для этой недели
+        existing_files = set()
+        if only_changed_days and changed_days is not None:
+            for date, day_name in week_dates:
+                date_obj = date.date()
+                if date_obj > today:
+                    date_str = date.strftime('%Y-%m-%d')
+                    schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+                    if os.path.exists(schedule_file):
+                        existing_files.add(date_str)
+        
         for date, day_name in week_dates:
             date_obj = date.date()
             
@@ -718,9 +729,13 @@ class ScheduleManager:
                 # 1. День был явно изменен через requests (если changed_days указан) - сохраняем ВСЕГДА, даже если совпадает с default
                 # 2. ИЛИ день отличается от default (если changed_days не указан)
                 should_save = False
+                should_delete = False
                 if changed_days is not None:
                     # Сохраняем все дни, которые были изменены через requests (даже если результат совпадает с default)
-                    should_save = day_name in changed_days  # Убираем проверку is_different
+                    day_in_changed = day_name in changed_days
+                    should_save = day_in_changed  # Убираем проверку is_different
+                    # Удаляем дни, которых нет в changed_days, но они есть в файлах
+                    should_delete = not day_in_changed and date_str in existing_files
                 else:
                     # Старое поведение: сохраняем все отличающиеся дни
                     should_save = is_different
@@ -734,8 +749,14 @@ class ScheduleManager:
                             f.write(f"{', '.join(employees)}\n")
                     except Exception as e:
                         logger.error(f"Ошибка сохранения расписания {date_str} в файл: {e}")
-                # Не удаляем существующие файлы, даже если они совпадают с default
-                # Они могли быть созданы ранее и их нужно оставить
+                elif should_delete:
+                    # Удаляем файл, который не был изменен через requests
+                    schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+                    try:
+                        os.remove(schedule_file)
+                        logger.info(f"🗑️ Удален файл расписания для {date_str} ({day_name}) - не в requests")
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить файл расписания для {date_str}: {e}")
             else:
                 # Сохраняем все дни (старое поведение)
                 schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
