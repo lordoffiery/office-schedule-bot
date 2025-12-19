@@ -1718,14 +1718,14 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                 await update_status(response)
                 
                 try:
-                    # Строим расписание на основе заявок
+                    # Строим расписание на основе заявок (на основе default_schedule + requests)
                     schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
                     
-                    # Сохраняем расписание для недели
-                    schedule_manager.save_schedule_for_week(week_start, schedule)
+                    # Сохраняем только измененные дни для будущих недель
+                    schedule_manager.save_schedule_for_week(week_start, schedule, only_changed_days=True, employee_manager=employee_manager)
                     
                     total_rebuilt += 1
-                    response += f"   ✅ Расписание перестроено\n"
+                    response += f"   ✅ Расписание перестроено (сохранены только измененные дни)\n"
                 except Exception as e:
                     logger.error(f"Ошибка перестройки расписания для недели {week_str}: {e}", exc_info=True)
                     total_errors += 1

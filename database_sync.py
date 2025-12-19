@@ -144,6 +144,28 @@ def load_schedule_from_db_sync(date_str: str) -> Optional[Dict[str, str]]:
         conn.close()
 
 
+def delete_schedule_from_db_sync(date_str: str) -> bool:
+    """Синхронное удаление расписания на дату из PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        schedule_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM schedules WHERE date = %s", (schedule_date,))
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления расписания из PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def load_requests_from_db_sync(week_start_str: str) -> List[Dict]:
     """Синхронная загрузка заявок из PostgreSQL"""
     conn = _get_connection()

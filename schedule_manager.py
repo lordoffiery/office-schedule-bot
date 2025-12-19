@@ -564,22 +564,85 @@ class ScheduleManager:
             return formatted_default
         return default_schedule_list
     
-    def save_schedule_for_week(self, week_start: datetime, schedule: Dict[str, List[str]]):
-        """Сохранить расписание на неделю в PostgreSQL, Google Sheets и файлы"""
+    def save_schedule_for_week(self, week_start: datetime, schedule: Dict[str, List[str]], 
+                              only_changed_days: bool = False, employee_manager=None):
+        """
+        Сохранить расписание на неделю в PostgreSQL, Google Sheets и файлы
+        
+        Args:
+            week_start: Начало недели
+            schedule: Расписание в формате {day_name: [имена]}
+            only_changed_days: Если True, сохранять только дни, отличающиеся от default_schedule
+            employee_manager: Менеджер сотрудников для форматирования имен
+        """
+        from datetime import datetime as dt
+        import pytz
+        from config import TIMEZONE
+        
         week_dates = self.get_week_dates(week_start)
+        timezone = pytz.timezone(TIMEZONE)
+        now = dt.now(timezone)
+        today = now.date()
+        
+        # Загружаем default_schedule для сравнения
+        default_schedule = self.load_default_schedule()
+        default_schedule_list = self._default_schedule_to_list(default_schedule)
+        
+        # Форматируем имена в default_schedule для сравнения
+        if employee_manager:
+            formatted_default = {}
+            for day, employees in default_schedule_list.items():
+                formatted_default[day] = [employee_manager.format_employee_name(emp) for emp in employees]
+        else:
+            formatted_default = default_schedule_list
         
         # Сохраняем в PostgreSQL (приоритет 1)
         pool = _get_pool()
         if USE_POSTGRESQL and pool and save_schedule_to_db:
             for date, day_name in week_dates:
+                date_obj = date.date()
+                
+                # Пропускаем текущую и прошлые недели
+                if date_obj <= today:
+                    continue
+                
                 date_str = date.strftime('%Y-%m-%d')
                 employees = schedule.get(day_name, [])
-                employees_str = ', '.join(employees)
-                try:
-                    from database_sync import save_schedule_to_db_sync
-                    save_schedule_to_db_sync(date_str, day_name, employees_str)
-                except Exception as e:
-                    logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+                default_employees = formatted_default.get(day_name, [])
+                
+                # Сортируем для сравнения
+                employees_sorted = sorted([e.strip() for e in employees if e.strip()])
+                default_employees_sorted = sorted([e.strip() for e in default_employees if e.strip()])
+                
+                # Проверяем, отличается ли расписание от default
+                is_different = employees_sorted != default_employees_sorted
+                
+                if only_changed_days:
+                    # Сохраняем только если отличается от default
+                    if is_different:
+                        employees_str = ', '.join(employees)
+                        try:
+                            from database_sync import save_schedule_to_db_sync
+                            save_schedule_to_db_sync(date_str, day_name, employees_str)
+                            logger.debug(f"Сохранено измененное расписание для {date_str} ({day_name})")
+                        except Exception as e:
+                            logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+                    else:
+                        # Удаляем из schedules, если теперь совпадает с default
+                        try:
+                            from database_sync import delete_schedule_from_db_sync
+                            delete_schedule_from_db_sync(date_str)
+                            logger.debug(f"Удалено расписание для {date_str} (совпадает с default)")
+                        except Exception as e:
+                            logger.debug(f"Не удалось удалить расписание для {date_str}: {e}")
+                else:
+                    # Сохраняем все дни (старое поведение)
+                    employees_str = ', '.join(employees)
+                    try:
+                        from database_sync import save_schedule_to_db_sync
+                        save_schedule_to_db_sync(date_str, day_name, employees_str)
+                    except Exception as e:
+                        logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         #     try:
         #         rows_to_save = []
         #         for date, day_name in week_dates:
@@ -612,20 +675,55 @@ class ScheduleManager:
         #     except Exception as e:
         #         logger.warning(f"Ошибка сохранения расписания недели в Google Sheets: {e}")
         
-        # Сохраняем в файлы
+        # Сохраняем в файлы (только измененные дни, если only_changed_days=True)
         for date, day_name in week_dates:
+            date_obj = date.date()
+            
+            # Пропускаем текущую и прошлые недели
+            if date_obj <= today:
+                continue
+            
             date_str = date.strftime('%Y-%m-%d')
-            schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
-            
             employees = schedule.get(day_name, [])
+            default_employees = formatted_default.get(day_name, [])
             
-            try:
-                with open(schedule_file, 'w', encoding='utf-8') as f:
-                    f.write(f"{date_str}\n")
-                    f.write(f"{day_name}\n")
-                    f.write(f"{', '.join(employees)}\n")
-            except Exception as e:
-                logger.error(f"Ошибка сохранения расписания {date_str} в файл: {e}")
+            # Сортируем для сравнения
+            employees_sorted = sorted([e.strip() for e in employees if e.strip()])
+            default_employees_sorted = sorted([e.strip() for e in default_employees if e.strip()])
+            
+            # Проверяем, отличается ли расписание от default
+            is_different = employees_sorted != default_employees_sorted
+            
+            if only_changed_days:
+                if is_different:
+                    # Сохраняем только если отличается
+                    schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+                    try:
+                        with open(schedule_file, 'w', encoding='utf-8') as f:
+                            f.write(f"{date_str}\n")
+                            f.write(f"{day_name}\n")
+                            f.write(f"{', '.join(employees)}\n")
+                    except Exception as e:
+                        logger.error(f"Ошибка сохранения расписания {date_str} в файл: {e}")
+                else:
+                    # Удаляем файл, если совпадает с default
+                    schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+                    if os.path.exists(schedule_file):
+                        try:
+                            os.remove(schedule_file)
+                            logger.debug(f"Удален файл расписания для {date_str} (совпадает с default)")
+                        except Exception as e:
+                            logger.debug(f"Не удалось удалить файл расписания для {date_str}: {e}")
+            else:
+                # Сохраняем все дни (старое поведение)
+                schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
+                try:
+                    with open(schedule_file, 'w', encoding='utf-8') as f:
+                        f.write(f"{date_str}\n")
+                        f.write(f"{day_name}\n")
+                        f.write(f"{', '.join(employees)}\n")
+                except Exception as e:
+                    logger.error(f"Ошибка сохранения расписания {date_str} в файл: {e}")
     
     def update_schedule_for_date(self, date: datetime, employee_name: str, 
                                  action: str, employee_manager):
