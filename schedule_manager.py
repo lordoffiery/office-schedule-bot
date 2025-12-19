@@ -1464,13 +1464,23 @@ class ScheduleManager:
                 for day in days_list:
                     if day in schedule:
                         # Удаляем сотрудника из всех мест этого дня, где он мог быть
+                        removed_from_places = []
                         for place_key in list(schedule[day].keys()):
                             existing_name = schedule[day].get(place_key, '')
                             if existing_name:
                                 plain_existing = self.get_plain_name_from_formatted(existing_name)
                                 if plain_existing == employee_name:
                                     schedule[day][place_key] = ''
+                                    removed_from_places.append(place_key)
+                        if removed_from_places:
+                            logger.debug(f"_assign_fixed_places: удален {employee_name} из мест {removed_from_places} в день {day}")
                         # Назначаем сотрудника на фиксированное место
+                        # Проверяем, не занято ли уже это место другим сотрудником
+                        existing_at_place = schedule[day].get(assigned_place, '')
+                        if existing_at_place:
+                            plain_existing = self.get_plain_name_from_formatted(existing_at_place)
+                            if plain_existing != employee_name:
+                                logger.warning(f"_assign_fixed_places: место {assigned_place} в день {day} уже занято {plain_existing}, но назначаем {employee_name}")
                         schedule[day][assigned_place] = employee_name
         
         return employee_to_place
@@ -1514,13 +1524,39 @@ class ScheduleManager:
         
         # После назначения фиксированных мест заполняем оставшиеся места из default_schedule
         # Только те места, которые не были назначены через _assign_fixed_places
+        # И только тех сотрудников, которые еще не назначены на другие места в этот день
         for day_name, places_dict in default_schedule.items():
+            # Собираем множество сотрудников, которые уже назначены в этот день (через _assign_fixed_places)
+            already_assigned_employees = set()
+            for place_key, existing_name in schedule[day_name].items():
+                if existing_name:
+                    plain_name = self.get_plain_name_from_formatted(existing_name)
+                    if plain_name:
+                        already_assigned_employees.add(plain_name)
+            
             for place_key, name in places_dict.items():
                 if name:  # Если место занято в default_schedule
+                    plain_new = self.get_plain_name_from_formatted(name)
                     # Проверяем, не назначен ли уже сотрудник на это место через _assign_fixed_places
-                    if not schedule[day_name].get(place_key):
-                        # Место свободно - заполняем из default_schedule
-                        schedule[day_name][place_key] = name
+                    existing_name = schedule[day_name].get(place_key, '')
+                    if not existing_name:
+                        # Место свободно - проверяем, не назначен ли уже этот сотрудник на другое место
+                        if plain_new not in already_assigned_employees:
+                            # Сотрудник еще не назначен - заполняем из default_schedule
+                            schedule[day_name][place_key] = name
+                            already_assigned_employees.add(plain_new)
+                        else:
+                            # Сотрудник уже назначен на другое место - не добавляем дубликат
+                            logger.debug(f"Пропуск заполнения места {place_key} в день {day_name}: сотрудник {plain_new} уже назначен на другое место")
+                    else:
+                        # Место уже занято - проверяем, не дубликат ли это
+                        plain_existing = self.get_plain_name_from_formatted(existing_name)
+                        if plain_existing == plain_new:
+                            # Это тот же сотрудник - не добавляем дубликат
+                            logger.debug(f"Пропуск заполнения места {place_key} в день {day_name}: сотрудник {plain_new} уже на месте {place_key}")
+                        else:
+                            # Разные сотрудники - оставляем того, кто был назначен через _assign_fixed_places
+                            logger.debug(f"Пропуск заполнения места {place_key} в день {day_name}: место занято {plain_existing}, не добавляем {plain_new}")
         
         # Шаг 2: Применяем заявки (skip_day, add_day)
         # Создаем словарь заявок по сотрудникам
