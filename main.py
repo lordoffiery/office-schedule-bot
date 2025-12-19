@@ -603,7 +603,7 @@ async def cmd_my_schedule(message: Message):
     else:
         # Загружаем заявки на неделю и строим расписание с учетом заявок
         requests = schedule_manager.load_requests_for_week(current_week_start)
-        schedule = schedule_manager.build_schedule_from_requests(current_week_start, requests, employee_manager)
+        schedule, _ = schedule_manager.build_schedule_from_requests(current_week_start, requests, employee_manager)
     
     # Загружаем default_schedule для определения реальных мест
     default_schedule = schedule_manager.load_default_schedule()
@@ -1045,7 +1045,7 @@ async def cmd_full_schedule(message: Message):
     else:
         # Загружаем заявки на неделю и строим расписание с учетом заявок
         requests = schedule_manager.load_requests_for_week(week_start)
-        schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
+        schedule, _ = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
     
     # Загружаем default_schedule для определения реальных мест
     default_schedule = schedule_manager.load_default_schedule()
@@ -1746,7 +1746,7 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                     
                     # Строим расписание на основе заявок (на основе default_schedule + requests)
                     # Игнорируем то, что уже есть в schedules
-                    schedule = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
+                    schedule, removed_by_skipped = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
                     
                     logger.info(f"📋 Неделя {week_str}: построенное расписание после применения requests:")
                     for day, emps in schedule.items():
@@ -1778,15 +1778,20 @@ async def cmd_admin_rebuild_schedules_from_requests(message: Message):
                             logger.info(f"  До дополнения: {len(schedule_day)} сотрудников в schedule, {len(default_day)} в default")
                             
                             # Дополняем пустые места из default до полного расписания
-                            # Добавляем тех, кого нет в schedule, до количества мест в default
+                            # НО не добавляем сотрудников, которые были удалены через days_skipped
                             for emp in default_day:
                                 emp_stripped = emp.strip()
+                                emp_plain = schedule_manager.get_plain_name_from_formatted(emp_stripped)
                                 if emp_stripped and emp_stripped not in schedule_names:
-                                    schedule_day.append(emp)
-                                    schedule_names.add(emp_stripped)
-                                    # Останавливаемся, когда достигли количества мест в default
-                                    if len(schedule_day) >= len(default_day):
-                                        break
+                                    # Проверяем, не был ли этот сотрудник удален через days_skipped
+                                    if emp_plain not in removed_by_skipped.get(day_name, set()):
+                                        schedule_day.append(emp)
+                                        schedule_names.add(emp_stripped)
+                                        # Останавливаемся, когда достигли количества мест в default
+                                        if len(schedule_day) >= len(default_day):
+                                            break
+                                    else:
+                                        logger.debug(f"  Пропускаем {emp_plain} при дополнении (был удален через days_skipped)")
                             
                             # Сохраняем день, так как он изменился после применения requests
                             # Даже если после дополнения он совпадает с default, изменения из requests должны быть сохранены

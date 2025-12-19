@@ -1468,15 +1468,21 @@ class ScheduleManager:
     
     def build_schedule_from_requests(self, week_start: datetime, 
                                      requests: List[Dict],
-                                     employee_manager) -> Dict[str, List[str]]:
+                                     employee_manager) -> tuple[Dict[str, List[str]], Dict[str, set]]:
         """
         Построить расписание на основе заявок с сохранением фиксированных мест
         
         Returns:
-            Dict[str, List[str]] - расписание в формате {день: [имена]} для обратной совместимости
+            tuple[Dict[str, List[str]], Dict[str, set]] - расписание и словарь удаленных через days_skipped
         """
         # Начинаем с расписания по умолчанию (в новом формате JSON)
         default_schedule = self.load_default_schedule()
+        
+        # Отслеживаем, какие сотрудники были удалены через days_skipped для каждого дня
+        # Это нужно, чтобы не добавлять их обратно при дополнении
+        removed_by_skipped = {}  # {day: set(employee_names)}
+        for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
+            removed_by_skipped[day_name] = set()
         
         # Копируем расписание по умолчанию (но очищаем имена, оставляя только структуру мест)
         # Всегда создаем все 8 мест для каждого дня, даже если в default_schedule их меньше
@@ -1491,6 +1497,12 @@ class ScheduleManager:
                 place_key = f'1.{i}'
                 if place_key not in schedule[day_name]:
                     schedule[day_name][place_key] = ''
+        
+        # Заполняем расписание всеми сотрудниками из default_schedule
+        for day_name, places_dict in default_schedule.items():
+            for place_key, name in places_dict.items():
+                if name:  # Если место занято
+                    schedule[day_name][place_key] = name
         
         # Шаг 1: Назначаем фиксированные места сотрудникам на основе приоритета
         employee_to_place = self._assign_fixed_places(default_schedule, schedule, employee_manager)
@@ -1569,21 +1581,20 @@ class ScheduleManager:
                     place_key_before = self._find_employee_in_places(schedule[day], employee_name)
                     logger.info(f"  сотрудник в расписании до удаления: {place_key_before is not None}")
                     
-                    if day_was_requested:
-                        # День был запрошен через requests - удаляем сотрудника
-                        logger.info(f"  ✅ УДАЛЯЕМ {employee_name} из {day} (день был запрошен через requests)")
-                        if fixed_place and fixed_place in schedule[day]:
-                            # Освобождаем место
+                    # Удаляем сотрудника из дня, если он указал этот день в days_skipped
+                    # Независимо от того, был ли он в default_schedule или был добавлен через requests
+                    logger.info(f"  ✅ УДАЛЯЕМ {employee_name} из {day} (указан в days_skipped)")
+                    if fixed_place and fixed_place in schedule[day]:
+                        # Проверяем, что на этом месте именно этот сотрудник
+                        place_name = self.get_plain_name_from_formatted(schedule[day][fixed_place])
+                        if place_name == employee_name:
                             schedule[day][fixed_place] = ''
-                        else:
-                            # Ищем сотрудника в расписании и удаляем
-                            place_key = self._find_employee_in_places(schedule[day], employee_name)
-                            if place_key:
-                                schedule[day][place_key] = ''
+                            removed_by_skipped[day].add(employee_name)
                     else:
-                        # День не был в days_requested, значит сотрудник был в default_schedule
-                        # days_skipped не должен его удалять (сотрудник остается в default_schedule)
-                        logger.info(f"  ❌ НЕ удаляем {employee_name} из {day} (день не был запрошен, сотрудник был в default_schedule)")
+                        place_key = self._find_employee_in_places(schedule[day], employee_name)
+                        if place_key:
+                            schedule[day][place_key] = ''
+                            removed_by_skipped[day].add(employee_name)
                     
                     # Проверяем, остался ли сотрудник в расписании после обработки
                     place_key_after = self._find_employee_in_places(schedule[day], employee_name)
@@ -1596,7 +1607,7 @@ class ScheduleManager:
             # Форматируем имена с никнеймами для вывода
             formatted_schedule[day] = [employee_manager.format_employee_name(emp) for emp in employees]
         
-        return formatted_schedule
+        return formatted_schedule, removed_by_skipped
     
     def get_available_slots(self, schedule: Dict[str, List[str]]) -> Dict[str, int]:
         """Получить количество свободных мест по дням"""
