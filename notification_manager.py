@@ -101,7 +101,14 @@ class NotificationManager:
                         logger.error(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
         
         # Сохраняем финальное расписание (с учетом очереди)
-        self.schedule_manager.save_schedule_for_week(next_week_start, schedule)
+        # Важно: сохраняем ВСЕ дни недели, включая те, что совпадают с default
+        # чтобы после очистки requests расписание оставалось доступным
+        self.schedule_manager.save_schedule_for_week(
+            next_week_start, 
+            schedule, 
+            only_changed_days=False,  # Сохраняем все дни, не только измененные
+            employee_manager=self.employee_manager
+        )
         
         # Получаем информацию о свободных местах
         available_slots = self.schedule_manager.get_available_slots(schedule)
