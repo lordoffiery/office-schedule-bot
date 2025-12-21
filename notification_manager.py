@@ -70,7 +70,8 @@ class NotificationManager:
             # Если заявок нет, используем расписание по умолчанию
             schedule = self.schedule_manager.load_default_schedule()
         else:
-            schedule = self.schedule_manager.build_schedule_from_requests(
+            # build_schedule_from_requests возвращает кортеж (formatted_schedule, removed_by_skipped)
+            schedule, _ = self.schedule_manager.build_schedule_from_requests(
                 next_week_start, requests, self.employee_manager
             )
         
