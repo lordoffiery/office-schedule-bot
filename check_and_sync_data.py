@@ -172,6 +172,8 @@ def compare_and_sync_employees(sheets_manager: GoogleSheetsManager):
 
 def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать отложенных сотрудников"""
+    logger.info("🔍 [PENDING_EMPLOYEES] Начало синхронизации отложенных сотрудников")
+    """Сравнить и синхронизировать отложенных сотрудников"""
     print("\n⏳ Проверка отложенных сотрудников...")
     
     # Загружаем администраторов и сотрудников для проверки
@@ -215,14 +217,15 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
     # Загружаем из PostgreSQL
     db_pending = load_pending_employees_from_db_sync()
     
-    # Удаляем администраторов из PostgreSQL pending_employees
-    admins_in_pending = []
-    for username in list(db_pending.keys()):
-        telegram_id = username_to_telegram_id.get(username)
-        if telegram_id and telegram_id in db_admins:
-            admins_in_pending.append(username)
-            remove_pending_employee_from_db_sync(username)
-            print(f"   🗑️ Удален администратор @{username} из pending_employees в PostgreSQL")
+        # Удаляем администраторов из PostgreSQL pending_employees
+        admins_in_pending = []
+        for username in list(db_pending.keys()):
+            telegram_id = username_to_telegram_id.get(username)
+            if telegram_id and telegram_id in db_admins:
+                admins_in_pending.append(username)
+                logger.warning(f"🗑️ [PENDING_EMPLOYEES] DELETE: Удаление администратора @{username} (telegram_id={telegram_id}) из pending_employees")
+                remove_pending_employee_from_db_sync(username)
+                print(f"   🗑️ Удален администратор @{username} из pending_employees в PostgreSQL")
     
     if admins_in_pending:
         print(f"   🗑️ Удалено администраторов из PostgreSQL: {len(admins_in_pending)}")
@@ -240,6 +243,7 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
         # Удаляем тех, кого нет в Google Sheets
         for username in db_pending:
             if username not in sheets_pending:
+                logger.warning(f"🗑️ [PENDING_EMPLOYEES] DELETE: Удаление @{username} из pending_employees (нет в Google Sheets)")
                 remove_pending_employee_from_db_sync(username)
         # Добавляем/обновляем тех, кто есть в Google Sheets (уже без администраторов)
         for username, manual_name in sheets_pending.items():
@@ -252,6 +256,8 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
 
 
 def compare_and_sync_default_schedule(sheets_manager: GoogleSheetsManager):
+    """Сравнить и синхронизировать расписание по умолчанию"""
+    logger.info("🔍 [DEFAULT_SCHEDULE] Начало синхронизации расписания по умолчанию")
     """Сравнить и синхронизировать расписание по умолчанию"""
     print("\n📋 Проверка расписания по умолчанию...")
     
@@ -358,6 +364,8 @@ def compare_and_sync_schedules(sheets_manager: GoogleSheetsManager):
 
 def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать заявки"""
+    logger.info("🔍 [REQUESTS] Начало синхронизации заявок")
+    """Сравнить и синхронизировать заявки"""
     print("\n📝 Проверка заявок...")
     
     # Загружаем из Google Sheets
@@ -428,6 +436,8 @@ def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
 
 def compare_and_sync_queue(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать очередь"""
+    logger.info("🔍 [QUEUE] Начало синхронизации очереди")
+    """Сравнить и синхронизировать очередь"""
     print("\n⏰ Проверка очереди...")
     
     # Загружаем из Google Sheets
@@ -476,8 +486,10 @@ def compare_and_sync_queue(sheets_manager: GoogleSheetsManager):
             print(f"      PostgreSQL: {len(db_queue)} записей")
             # Синхронизируем (удаляем все и добавляем заново из Google Sheets)
             # Удаляем все записи для этой даты
+            logger.warning(f"🗑️ [QUEUE] DELETE: Удаление всех записей очереди для {date_str} (будет синхронизировано из Google Sheets)")
             for q in db_queue:
                 from database_sync import remove_from_queue_db_sync
+                logger.debug(f"🗑️ [QUEUE] DELETE: Удаление записи date={date_str}, telegram_id={q['telegram_id']}, employee={q['employee_name']}")
                 remove_from_queue_db_sync(date_str, q['telegram_id'])
             # Добавляем из Google Sheets
             for q in sheets_data:

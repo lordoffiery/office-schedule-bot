@@ -146,18 +146,30 @@ def load_schedule_from_db_sync(date_str: str) -> Optional[Dict[str, str]]:
 
 def delete_schedule_from_db_sync(date_str: str) -> bool:
     """Синхронное удаление расписания на дату из PostgreSQL"""
+    logger.warning(f"🗑️ [SCHEDULES] DELETE: Удаление расписания для {date_str} из PostgreSQL")
     conn = _get_connection()
     if not conn:
+        logger.error(f"❌ [SCHEDULES] DELETE: нет подключения к PostgreSQL")
         return False
     
     try:
         schedule_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        logger.warning(f"🗑️ [SCHEDULES] DELETE: Выполняю DELETE FROM schedules WHERE date = {schedule_date}")
         with conn.cursor() as cur:
+            # Проверяем, что удаляем
+            cur.execute("SELECT date, day_name, employees FROM schedules WHERE date = %s", (schedule_date,))
+            existing = cur.fetchone()
+            if existing:
+                logger.warning(f"🗑️ [SCHEDULES] DELETE: Удаляю запись date={existing[0]}, day_name={existing[1]}, employees={existing[2][:100] if existing[2] else None}...")
+            else:
+                logger.info(f"ℹ️ [SCHEDULES] DELETE: Запись для {date_str} не найдена, удаление не требуется")
+            
             cur.execute("DELETE FROM schedules WHERE date = %s", (schedule_date,))
             conn.commit()
+            logger.warning(f"✅ [SCHEDULES] DELETE: Расписание для {date_str} удалено из PostgreSQL")
             return True
     except Exception as e:
-        logger.error(f"Ошибка удаления расписания из PostgreSQL (sync): {e}")
+        logger.error(f"❌ [SCHEDULES] DELETE: Ошибка удаления расписания {date_str} из PostgreSQL: {e}", exc_info=True)
         if conn:
             conn.rollback()
         return False
@@ -298,6 +310,7 @@ def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: s
 
 def remove_from_queue_db_sync(date_str: str, telegram_id: int) -> bool:
     """Синхронное удаление из очереди на дату в PostgreSQL"""
+    logger.debug(f"🗑️ [QUEUE] DELETE: Удаление из очереди date={date_str}, telegram_id={telegram_id}")
     conn = _get_connection()
     if not conn:
         return False
@@ -307,6 +320,7 @@ def remove_from_queue_db_sync(date_str: str, telegram_id: int) -> bool:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM queue WHERE date = %s AND telegram_id = %s", (queue_date, telegram_id))
             conn.commit()
+            logger.debug(f"✅ [QUEUE] DELETE: Запись удалена из очереди")
             return True
     except Exception as e:
         logger.error(f"Ошибка удаления из очереди в PostgreSQL (sync): {e}")
@@ -621,16 +635,24 @@ def save_admins_to_db_sync(admin_ids: Set[int], clear_all: bool = False) -> bool
         with conn.cursor() as cur:
             if clear_all:
                 # Удаляем всех текущих админов (используется только при полной синхронизации)
+                # Проверяем, что удаляем
+                cur.execute("SELECT telegram_id FROM admins")
+                existing_admins = [row[0] for row in cur.fetchall()]
+                logger.warning(f"🗑️ [ADMINS] DELETE: Удаление всех администраторов перед синхронизацией: {existing_admins}")
                 cur.execute("DELETE FROM admins")
-                logger.warning("⚠️ ВНИМАНИЕ: Все администраторы удалены перед синхронизацией!")
+                logger.warning("⚠️ [ADMINS] DELETE: Все администраторы удалены перед синхронизацией!")
+            else:
+                logger.info(f"ℹ️ [ADMINS] clear_all=False: существующие администраторы НЕ будут удалены")
             
             # Вставляем/обновляем указанных админов
             if admin_ids:
+                logger.info(f"➕ [ADMINS] Добавление/обновление администраторов: {sorted(admin_ids)}")
                 cur.executemany(
                     "INSERT INTO admins (telegram_id) VALUES (%s) ON CONFLICT (telegram_id) DO NOTHING",
                     [(admin_id,) for admin_id in admin_ids]
                 )
             conn.commit()
+            logger.info(f"✅ [ADMINS] Синхронизация администраторов завершена")
             return True
     except Exception as e:
         logger.error(f"Ошибка сохранения администраторов в PostgreSQL (sync): {e}")
@@ -812,14 +834,21 @@ def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: s
 
 def remove_pending_employee_from_db_sync(username: str) -> bool:
     """Синхронное удаление отложенного сотрудника из PostgreSQL"""
+    logger.warning(f"🗑️ [PENDING_EMPLOYEES] DELETE: Удаление @{username} из pending_employees")
     conn = _get_connection()
     if not conn:
         return False
     
     try:
         with conn.cursor() as cur:
+            # Проверяем, что удаляем
+            cur.execute("SELECT username, manual_name FROM pending_employees WHERE username = %s", (username,))
+            existing = cur.fetchone()
+            if existing:
+                logger.warning(f"🗑️ [PENDING_EMPLOYEES] DELETE: Удаляю запись username={existing[0]}, manual_name={existing[1]}")
             cur.execute("DELETE FROM pending_employees WHERE username = %s", (username,))
             conn.commit()
+            logger.warning(f"✅ [PENDING_EMPLOYEES] DELETE: @{username} удален из pending_employees")
             return True
     except Exception as e:
         logger.error(f"Ошибка удаления отложенного сотрудника из PostgreSQL (sync): {e}")
