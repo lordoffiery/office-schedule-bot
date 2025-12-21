@@ -688,11 +688,13 @@ class ScheduleManager:
                     else:
                         logger.debug(f"Пропуск дня {date_str} ({day_name}): не соответствует условиям сохранения и не требует удаления")
                 else:
-                    # Сохраняем все дни (старое поведение)
+                    # Сохраняем все дни (включая совпадающие с default) - используется при рассылке
                     employees_str = ', '.join(employees)
                     try:
                         from database_sync import save_schedule_to_db_sync
+                        logger.debug(f"💾 Сохранение расписания для {date_str} ({day_name}) в PostgreSQL (only_changed_days=False, все дни)")
                         save_schedule_to_db_sync(date_str, day_name, employees_str)
+                        logger.debug(f"✅ Сохранено расписание для {date_str} ({day_name}) в PostgreSQL")
                     except Exception as e:
                         logger.error(f"Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         #     try:
