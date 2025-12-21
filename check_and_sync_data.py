@@ -173,7 +173,6 @@ def compare_and_sync_employees(sheets_manager: GoogleSheetsManager):
 def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать отложенных сотрудников"""
     logger.info("🔍 [PENDING_EMPLOYEES] Начало синхронизации отложенных сотрудников")
-    """Сравнить и синхронизировать отложенных сотрудников"""
     print("\n⏳ Проверка отложенных сотрудников...")
     
     # Загружаем администраторов и сотрудников для проверки
@@ -217,9 +216,9 @@ def compare_and_sync_pending_employees(sheets_manager: GoogleSheetsManager):
     # Загружаем из PostgreSQL
     db_pending = load_pending_employees_from_db_sync()
     
-        # Удаляем администраторов из PostgreSQL pending_employees
-        admins_in_pending = []
-        for username in list(db_pending.keys()):
+    # Удаляем администраторов из PostgreSQL pending_employees
+    admins_in_pending = []
+    for username in list(db_pending.keys()):
             telegram_id = username_to_telegram_id.get(username)
             if telegram_id and telegram_id in db_admins:
                 admins_in_pending.append(username)
