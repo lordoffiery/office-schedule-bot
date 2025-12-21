@@ -593,17 +593,27 @@ def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: s
             conn.close()
 
 
-def save_admins_to_db_sync(admin_ids: Set[int]) -> bool:
-    """Синхронное сохранение администраторов в PostgreSQL"""
+def save_admins_to_db_sync(admin_ids: Set[int], clear_all: bool = False) -> bool:
+    """
+    Синхронное сохранение администраторов в PostgreSQL
+    
+    Args:
+        admin_ids: Множество ID администраторов для сохранения
+        clear_all: Если True, удаляет всех админов перед добавлением (опасно!)
+                   Если False, только добавляет/обновляет указанных админов
+    """
     conn = _get_connection()
     if not conn:
         return False
     
     try:
         with conn.cursor() as cur:
-            # Удаляем всех текущих админов
-            cur.execute("DELETE FROM admins")
-            # Вставляем новых
+            if clear_all:
+                # Удаляем всех текущих админов (используется только при полной синхронизации)
+                cur.execute("DELETE FROM admins")
+                logger.warning("⚠️ ВНИМАНИЕ: Все администраторы удалены перед синхронизацией!")
+            
+            # Вставляем/обновляем указанных админов
             if admin_ids:
                 cur.executemany(
                     "INSERT INTO admins (telegram_id) VALUES (%s) ON CONFLICT (telegram_id) DO NOTHING",

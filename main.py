@@ -2186,11 +2186,15 @@ async def cmd_admin_sync_from_sheets(message: Message):
         conn.close()
         
         # Выполняем синхронизацию
+        # ВАЖНО: синхронизация из Google Sheets в PostgreSQL обновляет только те записи, которые есть в Google Sheets
+        # Записи, которые есть только в PostgreSQL, НЕ удаляются (кроме случаев явного удаления)
         changes = False
         changes |= compare_and_sync_admins(sheets_manager)
         changes |= compare_and_sync_employees(sheets_manager)
         changes |= compare_and_sync_pending_employees(sheets_manager)
         changes |= compare_and_sync_default_schedule(sheets_manager)
+        # Синхронизируем schedules и requests только для дат/недель, которые есть в Google Sheets
+        # Это предотвращает случайное удаление данных, которых нет в Google Sheets
         changes |= compare_and_sync_schedules(sheets_manager)
         changes |= compare_and_sync_requests(sheets_manager)
         changes |= compare_and_sync_queue(sheets_manager)

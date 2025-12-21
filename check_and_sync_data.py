@@ -76,8 +76,11 @@ def compare_and_sync_admins(sheets_manager: GoogleSheetsManager):
         print(f"   Только в Google Sheets: {sheets_admins - db_admins}")
         print(f"   Только в PostgreSQL: {db_admins - sheets_admins}")
         print(f"   🔄 Синхронизирую из Google Sheets в PostgreSQL...")
-        save_admins_to_db_sync(sheets_admins)
-        print(f"   ✅ Синхронизация завершена")
+        print(f"   ⚠️ ВНИМАНИЕ: Администраторы из Google Sheets будут добавлены/обновлены")
+        print(f"   ⚠️ Администраторы, которых нет в Google Sheets, НЕ будут удалены из PostgreSQL")
+        # НЕ используем clear_all=True, чтобы не удалять админов, которых нет в Google Sheets
+        save_admins_to_db_sync(sheets_admins, clear_all=False)
+        print(f"   ✅ Синхронизация завершена (добавлены/обновлены админы из Google Sheets)")
         return True
     else:
         print(f"   ✅ Данные идентичны")
