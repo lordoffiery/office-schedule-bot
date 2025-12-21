@@ -539,6 +539,29 @@ def clear_requests_from_db_sync(week_start_str: str) -> bool:
             conn.close()
 
 
+def delete_request_from_db_sync(week_start_str: str, telegram_id: int) -> bool:
+    """Синхронное удаление конкретной заявки из PostgreSQL"""
+    conn = _get_connection()
+    if not conn:
+        return False
+    
+    try:
+        week_start_date = datetime.strptime(week_start_str, '%Y-%m-%d').date()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM requests WHERE week_start = %s AND telegram_id = %s", (week_start_date, telegram_id))
+            conn.commit()
+            logger.info(f"🗑️ [REQUESTS] DELETE: Удалена заявка week_start={week_start_str}, telegram_id={telegram_id}")
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка удаления заявки в PostgreSQL (sync): {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def save_log_to_db_sync(user_id: int, username: str, first_name: str, command: str, response: str) -> bool:
     """Синхронное сохранение лога в PostgreSQL"""
     conn = _get_connection()

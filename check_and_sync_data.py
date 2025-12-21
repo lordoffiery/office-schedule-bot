@@ -397,12 +397,19 @@ def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
                     'days_skipped': [d.strip() for d in days_skipped if d.strip()]
                 }
     
+    # Собираем все недели из Google Sheets
+    weeks_in_sheets = set()
+    for (week_start, _) in sheets_requests.keys():
+        weeks_in_sheets.add(week_start)
+    
     # Загружаем из PostgreSQL (по неделям из Google Sheets)
     differences = False
     synced_count = 0
     added_count = 0
     updated_count = 0
+    deleted_count = 0
     
+    # Сначала обрабатываем добавление и обновление заявок из Google Sheets
     for (week_start, telegram_id), sheets_data in sheets_requests.items():
         db_requests = load_requests_from_db_sync(week_start)
         db_data = None
@@ -455,12 +462,31 @@ def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
                 )
                 synced_count += 1
     
+    # Теперь удаляем заявки из PostgreSQL, которых нет в Google Sheets
+    # (только для недель, которые есть в Google Sheets)
+    from database_sync import delete_request_from_db_sync
+    for week_start in weeks_in_sheets:
+        db_requests = load_requests_from_db_sync(week_start)
+        sheets_telegram_ids = {telegram_id for (ws, telegram_id) in sheets_requests.keys() if ws == week_start}
+        
+        for db_req in db_requests:
+            db_telegram_id = db_req.get('telegram_id')
+            if db_telegram_id not in sheets_telegram_ids:
+                # Заявка есть в PostgreSQL, но её нет в Google Sheets - удаляем
+                differences = True
+                deleted_count += 1
+                db_employee_name = db_req.get('employee_name', '').strip()
+                logger.info(f"🗑️ [REQUESTS] DELETE: Удаление заявки: неделя {week_start}, сотрудник {db_telegram_id} ({db_employee_name})")
+                print(f"   🗑️ Удаление заявки для недели {week_start}, сотрудник {db_telegram_id} ({db_employee_name})")
+                delete_request_from_db_sync(week_start, db_telegram_id)
+                synced_count += 1
+    
     print(f"   Google Sheets: {len(sheets_requests)} заявок")
     print(f"   PostgreSQL: проверено {len(sheets_requests)} заявок")
     
     if differences:
-        print(f"   🔄 Синхронизировано {synced_count} заявок (добавлено: {added_count}, обновлено: {updated_count})")
-        logger.info(f"✅ [REQUESTS] Синхронизация завершена: добавлено {added_count}, обновлено {updated_count}")
+        print(f"   🔄 Синхронизировано {synced_count} заявок (добавлено: {added_count}, обновлено: {updated_count}, удалено: {deleted_count})")
+        logger.info(f"✅ [REQUESTS] Синхронизация завершена: добавлено {added_count}, обновлено {updated_count}, удалено {deleted_count}")
         return True
     else:
         print(f"   ✅ Данные идентичны")
