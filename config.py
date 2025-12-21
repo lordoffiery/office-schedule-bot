@@ -21,7 +21,7 @@ REMINDER_HOUR = 18  # 18:00
 REMINDER_MINUTE = 0
 
 # Время рассылки расписания (воскресенье вечером)
-SCHEDULE_SEND_HOUR = 20  # 20:00
+SCHEDULE_SEND_HOUR = 21  # 21:00 (временно для тестирования)
 SCHEDULE_SEND_MINUTE = 0
 
 # Пути к файлам данных
