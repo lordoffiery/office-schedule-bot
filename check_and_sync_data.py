@@ -400,6 +400,8 @@ def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
     # Загружаем из PostgreSQL (по неделям из Google Sheets)
     differences = False
     synced_count = 0
+    added_count = 0
+    updated_count = 0
     
     for (week_start, telegram_id), sheets_data in sheets_requests.items():
         db_requests = load_requests_from_db_sync(week_start)
@@ -409,27 +411,60 @@ def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
                 db_data = req
                 break
         
-        if db_data != sheets_data:
+        # Нормализуем данные для сравнения
+        sheets_days_requested = sorted(sheets_data.get('days_requested', []))
+        sheets_days_skipped = sorted(sheets_data.get('days_skipped', []))
+        sheets_employee_name = sheets_data.get('employee_name', '').strip()
+        
+        if db_data is None:
+            # Заявки нет в PostgreSQL - добавляем
             differences = True
-            print(f"   ⚠️ Различия для недели {week_start}, сотрудник {telegram_id}")
-            # Синхронизируем
+            added_count += 1
+            logger.info(f"➕ [REQUESTS] Добавление новой заявки: неделя {week_start}, сотрудник {telegram_id} ({sheets_employee_name})")
+            print(f"   ➕ Добавление новой заявки для недели {week_start}, сотрудник {telegram_id} ({sheets_employee_name})")
             save_request_to_db_sync(
                 week_start,
-                sheets_data['employee_name'],
+                sheets_employee_name,
                 sheets_data['telegram_id'],
                 sheets_data['days_requested'],
                 sheets_data['days_skipped']
             )
             synced_count += 1
+        else:
+            # Заявка есть в PostgreSQL - сравниваем
+            db_days_requested = sorted(db_data.get('days_requested', []))
+            db_days_skipped = sorted(db_data.get('days_skipped', []))
+            db_employee_name = db_data.get('employee_name', '').strip()
+            
+            # Сравниваем данные
+            if (db_days_requested != sheets_days_requested or 
+                db_days_skipped != sheets_days_skipped or 
+                db_employee_name != sheets_employee_name):
+                differences = True
+                updated_count += 1
+                logger.info(f"🔄 [REQUESTS] Обновление заявки: неделя {week_start}, сотрудник {telegram_id} ({sheets_employee_name})")
+                print(f"   🔄 Обновление заявки для недели {week_start}, сотрудник {telegram_id} ({sheets_employee_name})")
+                print(f"      DB: запрошены={db_days_requested}, пропущены={db_days_skipped}")
+                print(f"      Sheets: запрошены={sheets_days_requested}, пропущены={sheets_days_skipped}")
+                save_request_to_db_sync(
+                    week_start,
+                    sheets_employee_name,
+                    sheets_data['telegram_id'],
+                    sheets_data['days_requested'],
+                    sheets_data['days_skipped']
+                )
+                synced_count += 1
     
     print(f"   Google Sheets: {len(sheets_requests)} заявок")
     print(f"   PostgreSQL: проверено {len(sheets_requests)} заявок")
     
     if differences:
-        print(f"   🔄 Синхронизировано {synced_count} заявок")
+        print(f"   🔄 Синхронизировано {synced_count} заявок (добавлено: {added_count}, обновлено: {updated_count})")
+        logger.info(f"✅ [REQUESTS] Синхронизация завершена: добавлено {added_count}, обновлено {updated_count}")
         return True
     else:
         print(f"   ✅ Данные идентичны")
+        logger.info(f"✅ [REQUESTS] Данные идентичны, синхронизация не требуется")
         return False
 
 
