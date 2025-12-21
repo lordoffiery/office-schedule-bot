@@ -336,15 +336,18 @@ class ScheduleManager:
     def _get_employees_list_from_places(self, places_dict: Dict[str, str]) -> List[str]:
         """
         Получить список имен сотрудников из словаря мест (отсортированный по месту)
+        Ограничивает количество до MAX_OFFICE_SEATS
         
         Args:
             places_dict: Dict[str, str] - словарь мест {место: имя}
             
         Returns:
-            List[str] - список имен, отсортированный по номеру места
+            List[str] - список имен, отсортированный по номеру места (максимум MAX_OFFICE_SEATS)
         """
         sorted_places = sorted(places_dict.items(), key=lambda x: (int(x[0].split('.')[0]), int(x[0].split('.')[1])))
-        return [name for _, name in sorted_places if name]
+        employees = [name for _, name in sorted_places if name]
+        # Ограничиваем до MAX_OFFICE_SEATS мест
+        return employees[:MAX_OFFICE_SEATS]
     
     def _find_free_place(self, places_dict: Dict[str, str], department: int = 1) -> Optional[str]:
         """
@@ -932,28 +935,22 @@ class ScheduleManager:
         queue = self.get_queue_for_date(date)
         for entry in queue:
             if entry['employee_name'] == employee_name and entry['telegram_id'] == telegram_id:
+                logger.debug(f"  {employee_name} уже в очереди на {date_str}")
                 return False  # Уже в очереди
         
         # Сохраняем в PostgreSQL (приоритет 1)
-        pool = _get_pool()
-        logger.info(f"🔄 Начинаю добавление в очередь PostgreSQL: {employee_name} на {date_str}...")
-        logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
-        if USE_POSTGRESQL and pool and add_to_queue_db:
+        # Используем синхронную функцию напрямую, так как она не требует пула
+        if USE_POSTGRESQL:
             try:
-                # Используем синхронную функцию для добавления
                 from database_sync import add_to_queue_db_sync
-                logger.info(f"   Используем синхронное добавление в очередь PostgreSQL...")
+                logger.info(f"🔄 Добавление в очередь PostgreSQL: {employee_name} на {date_str}...")
                 result = add_to_queue_db_sync(date_str, employee_name, telegram_id)
-                logger.info(f"   Получен результат: {result}")
                 if result:
                     logger.info(f"✅ Добавлено в очередь PostgreSQL: {employee_name} на {date_str}")
                 else:
                     logger.warning(f"⚠️ Не удалось добавить в очередь PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка добавления в очередь в PostgreSQL: {e}", exc_info=True)
-        else:
-            pool = _get_pool()
-            logger.warning(f"⚠️ PostgreSQL недоступен для добавления в очередь: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, add_to_queue_db={add_to_queue_db is not None}")
         #     try:
         #         row = [date_str, employee_name, str(telegram_id)]
         #         self.sheets_manager.append_row(SHEET_QUEUE, row)
@@ -1050,8 +1047,8 @@ class ScheduleManager:
         logger.info(f"Очередь после удаления: {len(queue)} записей")
         
         # Удаляем из PostgreSQL (приоритет 1)
-        pool = _get_pool()
-        if USE_POSTGRESQL and pool and remove_from_queue_db:
+        # Используем синхронную функцию напрямую, так как она не требует пула
+        if USE_POSTGRESQL:
             try:
                 # Используем синхронную функцию для удаления
                 from database_sync import remove_from_queue_db_sync
@@ -1062,6 +1059,8 @@ class ScheduleManager:
                     logger.warning(f"⚠️ Не удалось удалить из очереди PostgreSQL: {employee_name} на {date_str}")
             except Exception as e:
                 logger.error(f"❌ Ошибка удаления из очереди в PostgreSQL: {e}", exc_info=True)
+        else:
+            logger.warning(f"⚠️ PostgreSQL недоступен для удаления из очереди: USE_POSTGRESQL={USE_POSTGRESQL}")
         #     try:
         #         # Удаляем все записи для этой даты и добавляем обновленные
         #         worksheet = self.sheets_manager.get_worksheet(SHEET_QUEUE)
@@ -1491,167 +1490,149 @@ class ScheduleManager:
                                      requests: List[Dict],
                                      employee_manager) -> tuple[Dict[str, List[str]], Dict[str, set]]:
         """
-        Построить расписание на основе заявок с сохранением фиксированных мест
+        Построить расписание на основе заявок по новому алгоритму:
+        1. Начинаем с default_schedule
+        2. Применяем days_skipped - удаляем сотрудников из дней, которые они пропустили
+        3. Применяем days_requested - добавляем сотрудников в запрошенные дни, но только если занято <= 7 мест
+           Если занято 8 мест, запрос должен идти в queue (обрабатывается отдельно)
         
         Returns:
             tuple[Dict[str, List[str]], Dict[str, set]] - расписание и словарь удаленных через days_skipped
         """
-        # Начинаем с расписания по умолчанию (в новом формате JSON)
+        # Шаг 1: Начинаем с расписания по умолчанию
         default_schedule = self.load_default_schedule()
         
+        # Копируем default_schedule в schedule (в формате словаря мест)
+        schedule = {}
+        for day_name, places_dict in default_schedule.items():
+            schedule[day_name] = places_dict.copy()
+        
         # Отслеживаем, какие сотрудники были удалены через days_skipped для каждого дня
-        # Это нужно, чтобы не добавлять их обратно при дополнении
         removed_by_skipped = {}  # {day: set(employee_names)}
         for day_name in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
             removed_by_skipped[day_name] = set()
         
-        # Копируем расписание по умолчанию (но очищаем имена, оставляя только структуру мест)
-        # Всегда создаем все 8 мест для каждого дня, даже если в default_schedule их меньше
-        schedule = {}
-        for day_name, places_dict in default_schedule.items():
-            schedule[day_name] = {}
-            # Копируем структуру мест из default_schedule
-            for place_key in places_dict.keys():
-                schedule[day_name][place_key] = ''
-            # Дополняем до MAX_OFFICE_SEATS, если мест меньше
-            for i in range(1, MAX_OFFICE_SEATS + 1):
-                place_key = f'1.{i}'
-                if place_key not in schedule[day_name]:
-                    schedule[day_name][place_key] = ''
-        
-        # Шаг 1: Назначаем фиксированные места сотрудникам на основе приоритета
-        # НЕ заполняем schedule из default_schedule перед этим, чтобы избежать дубликатов
-        # _assign_fixed_places сам заполнит schedule сотрудниками на их фиксированные места
-        employee_to_place = self._assign_fixed_places(default_schedule, schedule, employee_manager)
-        
-        # После назначения фиксированных мест заполняем оставшиеся места из default_schedule
-        # Только те места, которые не были назначены через _assign_fixed_places
-        # И только тех сотрудников, которые еще не назначены на другие места в этот день
-        for day_name, places_dict in default_schedule.items():
-            # Собираем множество сотрудников, которые уже назначены в этот день (через _assign_fixed_places)
-            already_assigned_employees = set()
-            for place_key, existing_name in schedule[day_name].items():
-                if existing_name:
-                    plain_name = self.get_plain_name_from_formatted(existing_name)
-                    if plain_name:
-                        already_assigned_employees.add(plain_name)
-            
-            for place_key, name in places_dict.items():
-                if name:  # Если место занято в default_schedule
-                    plain_new = self.get_plain_name_from_formatted(name)
-                    # Проверяем, не назначен ли уже сотрудник на это место через _assign_fixed_places
-                    existing_name = schedule[day_name].get(place_key, '')
-                    if not existing_name:
-                        # Место свободно - проверяем, не назначен ли уже этот сотрудник на другое место
-                        if plain_new not in already_assigned_employees:
-                            # Сотрудник еще не назначен - заполняем из default_schedule
-                            schedule[day_name][place_key] = name
-                            already_assigned_employees.add(plain_new)
-                        else:
-                            # Сотрудник уже назначен на другое место - не добавляем дубликат
-                            logger.debug(f"Пропуск заполнения места {place_key} в день {day_name}: сотрудник {plain_new} уже назначен на другое место")
-                    else:
-                        # Место уже занято - проверяем, не дубликат ли это
-                        plain_existing = self.get_plain_name_from_formatted(existing_name)
-                        if plain_existing == plain_new:
-                            # Это тот же сотрудник - не добавляем дубликат
-                            logger.debug(f"Пропуск заполнения места {place_key} в день {day_name}: сотрудник {plain_new} уже на месте {place_key}")
-                        else:
-                            # Разные сотрудники - оставляем того, кто был назначен через _assign_fixed_places
-                            logger.debug(f"Пропуск заполнения места {place_key} в день {day_name}: место занято {plain_existing}, не добавляем {plain_new}")
-        
-        # Шаг 2: Применяем заявки (skip_day, add_day)
-        # Создаем словарь заявок по сотрудникам
-        requests_by_employee = {}
+        # Шаг 2: Применяем days_skipped - удаляем сотрудников из дней, которые они пропустили
         for req in requests:
             employee_name = req['employee_name']
-            requests_by_employee[employee_name] = {
-                'days_requested': req['days_requested'],
-                'days_skipped': req['days_skipped']
-            }
-        
-        # Обрабатываем заявки
-        for employee_name, req_info in requests_by_employee.items():
-            days_requested = req_info['days_requested']
-            days_skipped = req_info['days_skipped']
+            days_skipped = req['days_skipped']
             
-            logger.info(f"build_schedule_from_requests: обрабатываем заявку для {employee_name}")
-            logger.info(f"  days_requested: {days_requested}")
-            logger.info(f"  days_skipped: {days_skipped}")
+            if not days_skipped:
+                continue
             
-            # Получаем фиксированное место сотрудника (если есть)
-            fixed_place = employee_to_place.get(employee_name)
-            logger.info(f"  fixed_place: {fixed_place}")
+            logger.info(f"build_schedule_from_requests: {employee_name}, пропущенные дни: {days_skipped}")
             
-            # Проверяем, где сотрудник был до обработки заявок (из default_schedule)
-            employee_in_default_days = set()
-            for day_name, places_dict in default_schedule.items():
-                for place_key, name in places_dict.items():
-                    plain_name = self.get_plain_name_from_formatted(name)
-                    if plain_name == employee_name:
-                        employee_in_default_days.add(day_name)
-            logger.info(f"  employee_in_default_days: {employee_in_default_days}")
-            
-            # Сначала добавляем сотрудника в запрошенные дни
-            # Это нужно сделать до удаления, чтобы знать, какие дни были добавлены через requests
-            for day in days_requested:
-                if day in schedule and day not in days_skipped:
-                    # Проверяем, есть ли уже сотрудник в расписании
-                    place_key = self._find_employee_in_places(schedule[day], employee_name)
-                    if not place_key:
-                        # Если у сотрудника есть фиксированное место, используем его
-                        if fixed_place:
-                            # Проверяем, свободно ли место
-                            if fixed_place not in schedule[day] or not schedule[day].get(fixed_place):
-                                schedule[day][fixed_place] = employee_name
-                            else:
-                                # Место занято - ищем свободное
-                                free_place = self._find_free_place(schedule[day], department=1)
-                                if free_place:
-                                    schedule[day][free_place] = employee_name
-                        else:
-                            # У сотрудника нет фиксированного места - ищем свободное
-                            free_place = self._find_free_place(schedule[day], department=1)
-                            if free_place:
-                                schedule[day][free_place] = employee_name
-                        # Если места нет, сотрудник не добавляется (работает удаленно)
-            
-            # Удаляем сотрудника из пропущенных дней
-            # Важно: удаляем только если день был в days_requested (т.е. сотрудник был добавлен через requests)
-            # Если сотрудник был в default_schedule на этот день, но не запрашивал его через requests,
-            # то days_skipped не должен его удалять
             for day in days_skipped:
-                if day in schedule:
-                    # Проверяем, был ли этот день в days_requested (т.е. сотрудник был добавлен через requests)
-                    # Если день был в days_requested, значит сотрудник был добавлен через requests, и его можно удалить
-                    # Если день не был в days_requested, значит сотрудник был в default_schedule, и его не удаляем
-                    day_was_requested = day in days_requested
-                    day_was_in_default = day in employee_in_default_days
-                    
-                    logger.info(f"build_schedule_from_requests: {employee_name}, день {day}: был запрошен={day_was_requested}, был в default={day_was_in_default}, пропущен=True")
-                    
-                    # Проверяем, есть ли сотрудник в расписании на этот день
-                    place_key_before = self._find_employee_in_places(schedule[day], employee_name)
-                    logger.info(f"  сотрудник в расписании до удаления: {place_key_before is not None}")
-                    
-                    # Удаляем сотрудника из дня, если он указал этот день в days_skipped
-                    # Независимо от того, был ли он в default_schedule или был добавлен через requests
+                if day not in schedule:
+                    continue
+                
+                # Ищем сотрудника в расписании на этот день
+                place_key = self._find_employee_in_places(schedule[day], employee_name)
+                if place_key:
+                    # Удаляем сотрудника из расписания
+                    schedule[day][place_key] = ''
+                    removed_by_skipped[day].add(employee_name)
                     logger.info(f"  ✅ УДАЛЯЕМ {employee_name} из {day} (указан в days_skipped)")
-                    if fixed_place and fixed_place in schedule[day]:
-                        # Проверяем, что на этом месте именно этот сотрудник
-                        place_name = self.get_plain_name_from_formatted(schedule[day][fixed_place])
-                        if place_name == employee_name:
-                            schedule[day][fixed_place] = ''
-                            removed_by_skipped[day].add(employee_name)
+        
+        # Шаг 2.5: После удаления через days_skipped заполняем освободившиеся места из очереди
+        # Получаем даты недели для работы с очередью
+        week_dates = self.get_week_dates(week_start)
+        day_to_date = {}
+        for date, day_name in week_dates:
+            day_to_date[day_name] = date
+        
+        # Для каждого дня проверяем очередь и заполняем освободившиеся места
+        for day_name, date in day_to_date.items():
+            if day_name not in schedule:
+                continue
+            
+            # Проверяем, сколько мест занято после применения days_skipped
+            occupied_count = len([name for name in schedule[day_name].values() if name])
+            
+            # Если есть свободные места (занято < 8), проверяем очередь
+            while occupied_count < MAX_OFFICE_SEATS:
+                # Получаем очередь на этот день
+                queue = self.get_queue_for_date(date)
+                if not queue:
+                    # Очередь пуста - выходим
+                    break
+                
+                # Берем первого из очереди
+                first_in_queue = queue[0]
+                queue_employee_name = first_in_queue['employee_name']
+                
+                # Проверяем, не добавлен ли уже этот сотрудник в расписание
+                place_key = self._find_employee_in_places(schedule[day_name], queue_employee_name)
+                if place_key:
+                    # Сотрудник уже в расписании - удаляем из очереди и берем следующего
+                    logger.info(f"  ⚠️ {queue_employee_name} уже в расписании на {day_name}, удаляем из очереди")
+                    self.remove_from_queue(date, queue_employee_name, first_in_queue['telegram_id'])
+                    continue
+                
+                # Добавляем первого из очереди в расписание
+                free_place = self._find_free_place(schedule[day_name], department=1)
+                if free_place:
+                    schedule[day_name][free_place] = queue_employee_name
+                    occupied_count += 1
+                    # Удаляем из очереди
+                    self.remove_from_queue(date, queue_employee_name, first_in_queue['telegram_id'])
+                    logger.info(f"  ✅ Добавлен {queue_employee_name} из очереди в {day_name} на место {free_place}")
+                else:
+                    # Не должно быть такого случая
+                    logger.warning(f"  ⚠️ Не найдено свободное место для {queue_employee_name} из очереди в {day_name}")
+                    break
+        
+        # Шаг 3: Применяем days_requested - добавляем сотрудников в запрошенные дни
+        # Но только если в этот день занято не больше 7 мест
+        # Если занято 8 мест, запрос идет в queue
+        for req in requests:
+            employee_name = req['employee_name']
+            telegram_id = req.get('telegram_id')
+            days_requested = req['days_requested']
+            
+            if not days_requested:
+                continue
+            
+            logger.info(f"build_schedule_from_requests: {employee_name}, запрошенные дни: {days_requested}")
+            
+            for day in days_requested:
+                if day not in schedule:
+                    continue
+                
+                # Проверяем, есть ли уже сотрудник в расписании
+                place_key = self._find_employee_in_places(schedule[day], employee_name)
+                if place_key:
+                    # Сотрудник уже в расписании - пропускаем
+                    logger.debug(f"  {employee_name} уже в расписании на {day}")
+                    continue
+                
+                # Получаем дату для этого дня
+                date = day_to_date.get(day)
+                if not date:
+                    logger.warning(f"  ⚠️ Не найдена дата для дня {day}")
+                    continue
+                
+                # Проверяем, сколько мест уже занято (после заполнения из очереди)
+                occupied_count = len([name for name in schedule[day].values() if name])
+                
+                if occupied_count >= MAX_OFFICE_SEATS:
+                    # Все 8 мест заняты - добавляем в очередь
+                    if telegram_id:
+                        logger.info(f"  ⚠️ Все {MAX_OFFICE_SEATS} мест заняты в {day}, добавляем {employee_name} в очередь")
+                        self.add_to_queue(date, employee_name, telegram_id)
                     else:
-                        place_key = self._find_employee_in_places(schedule[day], employee_name)
-                        if place_key:
-                            schedule[day][place_key] = ''
-                            removed_by_skipped[day].add(employee_name)
-                    
-                    # Проверяем, остался ли сотрудник в расписании после обработки
-                    place_key_after = self._find_employee_in_places(schedule[day], employee_name)
-                    logger.info(f"  сотрудник в расписании после обработки: {place_key_after is not None}")
+                        logger.warning(f"  ⚠️ Все {MAX_OFFICE_SEATS} мест заняты в {day}, но нет telegram_id для добавления в очередь")
+                    continue
+                
+                # Если занято <= 7 мест, добавляем сотрудника
+                # Ищем свободное место
+                free_place = self._find_free_place(schedule[day], department=1)
+                if free_place:
+                    schedule[day][free_place] = employee_name
+                    logger.info(f"  ✅ Добавлен {employee_name} в {day} на место {free_place}")
+                else:
+                    # Не должно быть такого случая, но на всякий случай
+                    logger.warning(f"  ⚠️ Не найдено свободное место для {employee_name} в {day}, хотя занято {occupied_count} мест")
         
         # Конвертируем обратно в формат списка для вывода
         formatted_schedule = {}
