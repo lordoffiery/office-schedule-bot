@@ -49,12 +49,14 @@ else:
 def compare_and_sync_admins(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать администраторов"""
     print("\n👑 Проверка администраторов...")
+    logger.info("🔍 [ADMINS] Начало синхронизации администраторов")
     
     # Загружаем из Google Sheets
     rows = sheets_manager.read_all_rows(SHEET_ADMINS)
     if not rows:
         print("⚠️ Google Sheets: администраторы не найдены")
         sheets_admins = set()
+        logger.info("🔍 [ADMINS] Google Sheets: администраторы не найдены")
     else:
         sheets_admins = set()
         for row in rows:
@@ -64,25 +66,33 @@ def compare_and_sync_admins(sheets_manager: GoogleSheetsManager):
                     sheets_admins.add(admin_id)
                 except ValueError:
                     continue
+        logger.info(f"🔍 [ADMINS] Google Sheets: загружено {len(sheets_admins)} администраторов: {sorted(sheets_admins)}")
     
     # Загружаем из PostgreSQL
     db_admins = load_admins_from_db_sync()
+    logger.info(f"🔍 [ADMINS] PostgreSQL: загружено {len(db_admins)} администраторов: {sorted(db_admins)}")
     
     print(f"   Google Sheets: {len(sheets_admins)} администраторов")
     print(f"   PostgreSQL: {len(db_admins)} администраторов")
     
     if sheets_admins != db_admins:
+        only_in_sheets = sheets_admins - db_admins
+        only_in_db = db_admins - sheets_admins
         print(f"   ⚠️ Различия найдены!")
-        print(f"   Только в Google Sheets: {sheets_admins - db_admins}")
-        print(f"   Только в PostgreSQL: {db_admins - sheets_admins}")
+        print(f"   Только в Google Sheets: {only_in_sheets}")
+        print(f"   Только в PostgreSQL: {only_in_db}")
+        logger.warning(f"⚠️ [ADMINS] Различия найдены! Только в Google Sheets: {only_in_sheets}, Только в PostgreSQL: {only_in_db}")
         print(f"   🔄 Синхронизирую из Google Sheets в PostgreSQL...")
         print(f"   ⚠️ ВНИМАНИЕ: Администраторы из Google Sheets будут добавлены/обновлены")
         print(f"   ⚠️ Администраторы, которых нет в Google Sheets, НЕ будут удалены из PostgreSQL")
+        logger.info(f"🔄 [ADMINS] Начинаю синхронизацию: clear_all=False (не удаляем существующих)")
         # НЕ используем clear_all=True, чтобы не удалять админов, которых нет в Google Sheets
         save_admins_to_db_sync(sheets_admins, clear_all=False)
+        logger.info(f"✅ [ADMINS] Синхронизация завершена (добавлены/обновлены админы из Google Sheets)")
         print(f"   ✅ Синхронизация завершена (добавлены/обновлены админы из Google Sheets)")
         return True
     else:
+        logger.info(f"✅ [ADMINS] Данные идентичны, синхронизация не требуется")
         print(f"   ✅ Данные идентичны")
         return False
 
@@ -90,12 +100,14 @@ def compare_and_sync_admins(sheets_manager: GoogleSheetsManager):
 def compare_and_sync_employees(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать сотрудников"""
     print("\n👥 Проверка сотрудников...")
+    logger.info("🔍 [EMPLOYEES] Начало синхронизации сотрудников")
     
     # Загружаем из Google Sheets
     rows = sheets_manager.read_all_rows(SHEET_EMPLOYEES)
     if not rows:
         print("⚠️ Google Sheets: сотрудники не найдены")
         sheets_employees = {}
+        logger.info("🔍 [EMPLOYEES] Google Sheets: сотрудники не найдены")
     else:
         from utils import filter_empty_rows
         rows = filter_empty_rows(rows)
@@ -114,9 +126,11 @@ def compare_and_sync_employees(sheets_manager: GoogleSheetsManager):
                 sheets_employees[telegram_id] = (manual_name, telegram_name, username, approved)
             except (ValueError, IndexError):
                 continue
+        logger.info(f"🔍 [EMPLOYEES] Google Sheets: загружено {len(sheets_employees)} сотрудников")
     
     # Загружаем из PostgreSQL
     db_employees = load_employees_from_db_sync()
+    logger.info(f"🔍 [EMPLOYEES] PostgreSQL: загружено {len(db_employees)} сотрудников")
     
     print(f"   Google Sheets: {len(sheets_employees)} сотрудников")
     print(f"   PostgreSQL: {len(db_employees)} сотрудников")
@@ -124,21 +138,34 @@ def compare_and_sync_employees(sheets_manager: GoogleSheetsManager):
     differences = False
     # Проверяем различия
     all_ids = set(sheets_employees.keys()) | set(db_employees.keys())
+    only_in_sheets = set(sheets_employees.keys()) - set(db_employees.keys())
+    only_in_db = set(db_employees.keys()) - set(sheets_employees.keys())
+    
+    if only_in_sheets or only_in_db:
+        logger.info(f"🔍 [EMPLOYEES] Только в Google Sheets: {len(only_in_sheets)} сотрудников")
+        logger.info(f"🔍 [EMPLOYEES] Только в PostgreSQL: {len(only_in_db)} сотрудников")
+    
     for telegram_id in all_ids:
         sheets_data = sheets_employees.get(telegram_id)
         db_data = db_employees.get(telegram_id)
         if sheets_data != db_data:
             differences = True
+            logger.debug(f"🔍 [EMPLOYEES] Различия для telegram_id={telegram_id}: sheets={sheets_data}, db={db_data}")
             break
     
     if differences or len(sheets_employees) != len(db_employees):
         print(f"   ⚠️ Различия найдены!")
+        logger.warning(f"⚠️ [EMPLOYEES] Различия найдены! Синхронизирую из Google Sheets в PostgreSQL")
         print(f"   🔄 Синхронизирую из Google Sheets в PostgreSQL...")
+        logger.info(f"🔄 [EMPLOYEES] Начинаю сохранение {len(sheets_employees)} сотрудников в PostgreSQL")
         for telegram_id, (manual_name, telegram_name, username, approved) in sheets_employees.items():
+            logger.debug(f"💾 [EMPLOYEES] Сохранение сотрудника telegram_id={telegram_id}, name={manual_name}")
             save_employee_to_db_sync(telegram_id, manual_name, telegram_name, username, approved)
+        logger.info(f"✅ [EMPLOYEES] Синхронизация завершена: сохранено {len(sheets_employees)} сотрудников")
         print(f"   ✅ Синхронизация завершена")
         return True
     else:
+        logger.info(f"✅ [EMPLOYEES] Данные идентичны, синхронизация не требуется")
         print(f"   ✅ Данные идентичны")
         return False
 
@@ -267,12 +294,14 @@ def compare_and_sync_default_schedule(sheets_manager: GoogleSheetsManager):
 def compare_and_sync_schedules(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать расписания"""
     print("\n📅 Проверка расписаний...")
+    logger.info("🔍 [SCHEDULES] Начало синхронизации расписаний")
     
     # Загружаем из Google Sheets
     rows = sheets_manager.read_all_rows(SHEET_SCHEDULES)
     if not rows:
         print("⚠️ Google Sheets: расписания не найдены")
         sheets_schedules = {}
+        logger.info("🔍 [SCHEDULES] Google Sheets: расписания не найдены")
     else:
         header_idx = get_header_start_idx(rows, ['date', 'day_name', 'employees'])
         if isinstance(header_idx, tuple):
@@ -286,12 +315,15 @@ def compare_and_sync_schedules(sheets_manager: GoogleSheetsManager):
             employees = row[2].strip() if len(row) > 2 else ''
             if date_str:
                 sheets_schedules[date_str] = {day_name: employees}
+        logger.info(f"🔍 [SCHEDULES] Google Sheets: загружено {len(sheets_schedules)} расписаний для дат: {sorted(sheets_schedules.keys())[:10]}...")
     
     # Загружаем из PostgreSQL (проверяем все даты из Google Sheets)
     differences = False
     synced_count = 0
     
+    logger.info(f"🔍 [SCHEDULES] Начинаю проверку {len(sheets_schedules)} расписаний из Google Sheets")
     for date_str in sheets_schedules:
+        logger.debug(f"🔍 [SCHEDULES] Проверка даты {date_str}")
         db_schedule = load_schedule_from_db_sync(date_str)
         sheets_data = sheets_schedules[date_str]
         
@@ -300,18 +332,26 @@ def compare_and_sync_schedules(sheets_manager: GoogleSheetsManager):
             print(f"   ⚠️ Различия для {date_str}:")
             print(f"      Google Sheets: {sheets_data}")
             print(f"      PostgreSQL: {db_schedule}")
+            logger.warning(f"⚠️ [SCHEDULES] Различия для {date_str}: Google Sheets={sheets_data}, PostgreSQL={db_schedule}")
             # Синхронизируем
+            logger.info(f"🔄 [SCHEDULES] Сохранение расписания для {date_str} из Google Sheets в PostgreSQL")
             for day_name, employees in sheets_data.items():
+                logger.info(f"🔄 [SCHEDULES] Сохранение {date_str} ({day_name}): {employees[:100]}...")
                 save_schedule_to_db_sync(date_str, day_name, employees)
             synced_count += 1
+            logger.info(f"✅ [SCHEDULES] Расписание для {date_str} сохранено")
+        else:
+            logger.debug(f"✅ [SCHEDULES] Расписание для {date_str} идентично, пропускаем")
     
     print(f"   Google Sheets: {len(sheets_schedules)} расписаний")
     print(f"   PostgreSQL: проверено {len(sheets_schedules)} расписаний")
     
     if differences:
+        logger.info(f"🔄 [SCHEDULES] Синхронизировано {synced_count} расписаний из {len(sheets_schedules)}")
         print(f"   🔄 Синхронизировано {synced_count} расписаний")
         return True
     else:
+        logger.info(f"✅ [SCHEDULES] Все расписания идентичны, синхронизация не требуется")
         print(f"   ✅ Данные идентичны")
         return False
 

@@ -233,13 +233,24 @@ def load_queue_from_db_sync(date_str: str) -> List[Dict]:
 
 def save_schedule_to_db_sync(date_str: str, day_name: str, employees_str: str) -> bool:
     """Синхронное сохранение расписания на дату в PostgreSQL"""
+    logger.info(f"💾 [SCHEDULES] save_schedule_to_db_sync: дата={date_str}, день={day_name}, сотрудники={employees_str[:100]}...")
     conn = _get_connection()
     if not conn:
+        logger.error(f"❌ [SCHEDULES] save_schedule_to_db_sync: нет подключения к PostgreSQL")
         return False
     
     try:
         schedule_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        logger.info(f"💾 [SCHEDULES] Выполняю INSERT/UPDATE для {date_str} (date={schedule_date})")
         with conn.cursor() as cur:
+            # Проверяем, есть ли уже запись
+            cur.execute("SELECT date, day_name, employees FROM schedules WHERE date = %s", (schedule_date,))
+            existing = cur.fetchone()
+            if existing:
+                logger.info(f"🔄 [SCHEDULES] Обновление существующей записи для {date_str}: было day_name={existing[1]}, employees={existing[2][:100] if existing[2] else None}...")
+            else:
+                logger.info(f"➕ [SCHEDULES] Создание новой записи для {date_str}")
+            
             cur.execute("""
                 INSERT INTO schedules (date, day_name, employees)
                 VALUES (%s, %s, %s)
@@ -249,10 +260,10 @@ def save_schedule_to_db_sync(date_str: str, day_name: str, employees_str: str) -
                     updated_at = NOW()
             """, (schedule_date, day_name, employees_str))
             conn.commit()
-            logger.debug(f"✅ Расписание {date_str} ({day_name}) успешно сохранено в PostgreSQL (sync)")
+            logger.info(f"✅ [SCHEDULES] Расписание {date_str} ({day_name}) успешно сохранено в PostgreSQL")
             return True
     except Exception as e:
-        logger.error(f"Ошибка сохранения расписания в PostgreSQL (sync): {e}")
+        logger.error(f"❌ [SCHEDULES] Ошибка сохранения расписания {date_str} в PostgreSQL: {e}", exc_info=True)
         if conn:
             conn.rollback()
         return False
