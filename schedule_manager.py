@@ -1593,17 +1593,10 @@ class ScheduleManager:
             if not days_requested:
                 continue
             
-            logger.info(f"build_schedule_from_requests: {employee_name}, запрошенные дни: {days_requested}")
+            logger.info(f"build_schedule_from_requests: {employee_name}, запрошенные дни: {days_requested}, telegram_id: {telegram_id}")
             
             for day in days_requested:
                 if day not in schedule:
-                    continue
-                
-                # Проверяем, есть ли уже сотрудник в расписании
-                place_key = self._find_employee_in_places(schedule[day], employee_name)
-                if place_key:
-                    # Сотрудник уже в расписании - пропускаем
-                    logger.debug(f"  {employee_name} уже в расписании на {day}")
                     continue
                 
                 # Получаем дату для этого дня
@@ -1612,16 +1605,36 @@ class ScheduleManager:
                     logger.warning(f"  ⚠️ Не найдена дата для дня {day}")
                     continue
                 
+                # Проверяем, есть ли уже сотрудник в расписании
+                place_key = self._find_employee_in_places(schedule[day], employee_name)
+                if place_key:
+                    # Сотрудник уже в расписании - возможно, он был добавлен из очереди
+                    # Проверяем, есть ли он в очереди, и если да - удаляем из очереди
+                    queue = self.get_queue_for_date(date)
+                    in_queue = any(entry['employee_name'] == employee_name and entry['telegram_id'] == telegram_id for entry in queue)
+                    if in_queue:
+                        logger.info(f"  {employee_name} уже в расписании на {day} (был добавлен из очереди), удаляем из очереди")
+                        self.remove_from_queue(date, employee_name, telegram_id)
+                    else:
+                        logger.debug(f"  {employee_name} уже в расписании на {day}")
+                    continue
+                
                 # Проверяем, сколько мест уже занято (после заполнения из очереди)
                 occupied_count = len([name for name in schedule[day].values() if name])
+                
+                logger.info(f"  Проверка для {employee_name} в {day}: занято {occupied_count} из {MAX_OFFICE_SEATS} мест")
                 
                 if occupied_count >= MAX_OFFICE_SEATS:
                     # Все 8 мест заняты - добавляем в очередь
                     if telegram_id:
-                        logger.info(f"  ⚠️ Все {MAX_OFFICE_SEATS} мест заняты в {day}, добавляем {employee_name} в очередь")
-                        self.add_to_queue(date, employee_name, telegram_id)
+                        logger.info(f"  ⚠️ Все {MAX_OFFICE_SEATS} мест заняты в {day}, добавляем {employee_name} в очередь (telegram_id: {telegram_id})")
+                        result = self.add_to_queue(date, employee_name, telegram_id)
+                        if result:
+                            logger.info(f"  ✅ {employee_name} успешно добавлен в очередь на {day}")
+                        else:
+                            logger.warning(f"  ⚠️ Не удалось добавить {employee_name} в очередь на {day}")
                     else:
-                        logger.warning(f"  ⚠️ Все {MAX_OFFICE_SEATS} мест заняты в {day}, но нет telegram_id для добавления в очередь")
+                        logger.warning(f"  ⚠️ Все {MAX_OFFICE_SEATS} мест заняты в {day}, но нет telegram_id для добавления в очередь для {employee_name}")
                     continue
                 
                 # Если занято <= 7 мест, добавляем сотрудника
