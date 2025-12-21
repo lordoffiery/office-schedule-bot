@@ -437,7 +437,6 @@ def compare_and_sync_requests(sheets_manager: GoogleSheetsManager):
 def compare_and_sync_queue(sheets_manager: GoogleSheetsManager):
     """Сравнить и синхронизировать очередь"""
     logger.info("🔍 [QUEUE] Начало синхронизации очереди")
-    """Сравнить и синхронизировать очередь"""
     print("\n⏰ Проверка очереди...")
     
     # Загружаем из Google Sheets
