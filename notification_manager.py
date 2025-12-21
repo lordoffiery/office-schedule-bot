@@ -62,9 +62,11 @@ class NotificationManager:
         """Отправить финальное расписание всем сотрудникам или только админам"""
         now = datetime.now(self.timezone)
         next_week_start = self.schedule_manager.get_week_start(now + timedelta(days=7))
+        logger.info(f"📅 Формирование расписания на неделю {next_week_start.strftime('%Y-%m-%d')}")
         
         # Загружаем заявки и формируем расписание
         requests = self.schedule_manager.load_requests_for_week(next_week_start)
+        logger.info(f"📋 Загружено заявок: {len(requests)}")
         
         if not requests:
             # Если заявок нет, используем расписание по умолчанию
@@ -227,13 +229,18 @@ class NotificationManager:
             
             try:
                 await self.bot.send_message(telegram_id, message)
+                sent_count += 1
             except Exception as e:
                 logger.error(f"Ошибка отправки расписания {telegram_id}: {e}")
+                failed_count += 1
+        
+        logger.info(f"✅ Расписание отправлено: успешно {sent_count}, ошибок {failed_count}")
         
         # Очищаем заявки после отправки только если это не тестовая рассылка
         # (при тестовой рассылке для админов заявки не должны очищаться)
         if not admins_only:
             self.schedule_manager.clear_requests_for_week(next_week_start)
+            logger.info("🗑️ Заявки на неделю очищены")
     
     async def merge_duplicates_daily(self):
         """Ежедневное схлопывание дубликатов сотрудников"""
@@ -261,13 +268,17 @@ class NotificationManager:
                 
                 # Пятница 18:00 - напоминание
                 if now.weekday() == 4 and now.hour == REMINDER_HOUR and now.minute == REMINDER_MINUTE:
+                    logger.info("🔔 Запуск рассылки напоминаний (пятница 18:00)")
                     await self.send_reminder()
+                    logger.info("✅ Рассылка напоминаний завершена")
                     # Ждем минуту, чтобы не отправить повторно
                     await asyncio.sleep(60)
                 
-                # Воскресенье 20:00 - рассылка расписания
+                # Воскресенье 20:00 (или другое время из конфига) - рассылка расписания
                 if now.weekday() == 6 and now.hour == SCHEDULE_SEND_HOUR and now.minute == SCHEDULE_SEND_MINUTE:
+                    logger.info(f"📤 Запуск рассылки расписания (воскресенье {SCHEDULE_SEND_HOUR}:{SCHEDULE_SEND_MINUTE:02d})")
                     await self.send_weekly_schedule()
+                    logger.info("✅ Рассылка расписания завершена")
                     # Ждем минуту, чтобы не отправить повторно
                     await asyncio.sleep(60)
                 
