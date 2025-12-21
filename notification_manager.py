@@ -120,6 +120,10 @@ class NotificationManager:
                     filtered_employees[employee_name] = telegram_id
             all_employees = filtered_employees
         
+        logger.info(f"📨 Отправка расписания {len(all_employees)} {'администраторам' if admins_only else 'сотрудникам'}")
+        sent_count = 0
+        failed_count = 0
+        
         # Получаем даты недели для определения расписания сотрудника
         week_dates = self.schedule_manager.get_week_dates(next_week_start)
         
