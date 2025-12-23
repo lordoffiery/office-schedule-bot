@@ -710,7 +710,8 @@ async def process_skip_day(date: datetime, employee_name: str, user_id: int, emp
         return f"❌ Дата {date.strftime('%d.%m.%Y')} не является рабочим днем (Пн-Пт)"
     
     # Если это текущая неделя - обновляем сохраненное расписание
-    if week_start == current_week_start:
+    # Сравниваем даты, а не datetime объекты, чтобы избежать проблем с часовыми поясами
+    if week_start.date() == current_week_start.date():
         # Проверяем, находится ли пользователь в очереди
         queue = schedule_manager.get_queue_for_date(date)
         in_queue = any(
@@ -895,7 +896,8 @@ async def process_add_day(date: datetime, employee_name: str, user_id: int, empl
         return f"❌ Дата {date.strftime('%d.%m.%Y')} не является рабочим днем (Пн-Пт)"
     
     # Если это текущая неделя - обновляем сохраненное расписание
-    if week_start == current_week_start:
+    # Сравниваем даты, а не datetime объекты, чтобы избежать проблем с часовыми поясами
+    if week_start.date() == current_week_start.date():
         success, free_slots = schedule_manager.update_schedule_for_date(
             date, employee_name, 'add', employee_manager
         )
