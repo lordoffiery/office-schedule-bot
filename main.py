@@ -1077,20 +1077,32 @@ async def cmd_full_schedule(message: Message):
     # Получаем начало недели для указанной даты
     week_start = schedule_manager.get_week_start(date)
     
-    # Проверяем, есть ли уже сохраненные расписания для этой недели
-    has_saved_schedules = schedule_manager.has_saved_schedules_for_week(week_start)
+    # Для будущих недель всегда строим из requests, чтобы показывать актуальное расписание
+    # Для текущей и прошлых недель используем сохраненные schedules
     week_dates = schedule_manager.get_week_dates(week_start)
+    now = datetime.now(timezone)
+    today = now.date()
     
-    if has_saved_schedules:
-        # Используем сохраненные расписания (load_schedule_for_date вернет default_schedule для дат без сохраненных данных)
-        schedule = {}
-        for d, day_name in week_dates:
-            day_schedule = schedule_manager.load_schedule_for_date(d, employee_manager)
-            schedule[day_name] = day_schedule.get(day_name, [])
-    else:
-        # Загружаем заявки на неделю и строим расписание с учетом заявок
+    # Определяем, является ли неделя будущей (все даты недели в будущем)
+    is_future_week = all(d.date() > today for d, _ in week_dates)
+    
+    if is_future_week:
+        # Для будущих недель всегда строим из requests для актуальности
         requests = schedule_manager.load_requests_for_week(week_start)
         schedule, _ = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
+    else:
+        # Для текущей и прошлых недель используем сохраненные schedules
+        has_saved_schedules = schedule_manager.has_saved_schedules_for_week(week_start)
+        if has_saved_schedules:
+            # Используем сохраненные расписания (load_schedule_for_date вернет default_schedule для дат без сохраненных данных)
+            schedule = {}
+            for d, day_name in week_dates:
+                day_schedule = schedule_manager.load_schedule_for_date(d, employee_manager)
+                schedule[day_name] = day_schedule.get(day_name, [])
+        else:
+            # Если нет сохраненных расписаний, строим из requests
+            requests = schedule_manager.load_requests_for_week(week_start)
+            schedule, _ = schedule_manager.build_schedule_from_requests(week_start, requests, employee_manager)
     
     # Загружаем default_schedule для определения реальных мест
     default_schedule = schedule_manager.load_default_schedule()
