@@ -557,15 +557,20 @@ class EmployeeManager:
         
         was_existing = username_lower in self.pending_employees
         old_name = self.pending_employees.get(username_lower) if was_existing else None
-        self.pending_employees[username_lower] = manual_name
         
-        # Сохраняем в PostgreSQL
+        # Сохраняем в PostgreSQL ПЕРВЫМ (приоритет 1)
         if USE_POSTGRESQL:
             try:
                 from database_sync import save_pending_employee_to_db_sync
                 save_pending_employee_to_db_sync(username_lower, manual_name)
+                logger.info(f"✅ Отложенный сотрудник {username_lower} сохранен в PostgreSQL")
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения отложенного сотрудника {username_lower} в PostgreSQL: {e}", exc_info=True)
+                # Не обновляем память, если не удалось сохранить в PostgreSQL
+                raise
+        
+        # Обновляем память только после успешного сохранения в PostgreSQL
+        self.pending_employees[username_lower] = manual_name
         
         # Сохраняем в Google Sheets и файл
         self._save_pending_employees()
@@ -580,15 +585,19 @@ class EmployeeManager:
         """Удалить отложенную запись после успешной регистрации"""
         username_lower = username.lower().lstrip('@')
         if username_lower in self.pending_employees:
-            del self.pending_employees[username_lower]
-            
-            # Удаляем из PostgreSQL
+            # Удаляем из PostgreSQL ПЕРВЫМ (приоритет 1)
             if USE_POSTGRESQL:
                 try:
                     from database_sync import remove_pending_employee_from_db_sync
                     remove_pending_employee_from_db_sync(username_lower)
+                    logger.info(f"✅ Отложенный сотрудник {username_lower} удален из PostgreSQL")
                 except Exception as e:
                     logger.error(f"❌ Ошибка удаления отложенного сотрудника {username_lower} из PostgreSQL: {e}", exc_info=True)
+                    # Не удаляем из памяти, если не удалось удалить из PostgreSQL
+                    return
+            
+            # Удаляем из памяти только после успешного удаления из PostgreSQL
+            del self.pending_employees[username_lower]
             
             # Сохраняем в Google Sheets и файл
             self._save_pending_employees()

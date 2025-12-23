@@ -203,16 +203,24 @@ class AdminManager:
         """Добавить администратора"""
         if telegram_id in self.admins:
             return False  # Уже админ
-        self.admins.add(telegram_id)
         
-        # Сохраняем в PostgreSQL
+        # Сохраняем в PostgreSQL ПЕРВЫМ (приоритет 1)
         if USE_POSTGRESQL:
             try:
                 from database_sync import add_admin_to_db_sync
                 result = add_admin_to_db_sync(telegram_id)
-                logger.debug(f"Админ {telegram_id} добавлен в PostgreSQL: {result}")
+                if result:
+                    logger.info(f"✅ Админ {telegram_id} добавлен в PostgreSQL")
+                else:
+                    logger.warning(f"⚠️ Админ {telegram_id} не добавлен в PostgreSQL (вернуло False)")
+                    return False
             except Exception as e:
-                logger.warning(f"Ошибка добавления администратора {telegram_id} в PostgreSQL: {e}", exc_info=True)
+                logger.error(f"❌ Ошибка добавления администратора {telegram_id} в PostgreSQL: {e}", exc_info=True)
+                # Не обновляем память, если не удалось сохранить в PostgreSQL
+                return False
+        
+        # Обновляем память только после успешного сохранения в PostgreSQL
+        self.admins.add(telegram_id)
         
         # Сохраняем в Google Sheets и файл
         self._save_admins()
@@ -222,15 +230,24 @@ class AdminManager:
         """Удалить администратора"""
         if telegram_id not in self.admins:
             return False  # Не является админом
-        self.admins.remove(telegram_id)
         
-        # Удаляем из PostgreSQL
+        # Удаляем из PostgreSQL ПЕРВЫМ (приоритет 1)
         if USE_POSTGRESQL:
             try:
                 from database_sync import remove_admin_from_db_sync
-                remove_admin_from_db_sync(telegram_id)
+                result = remove_admin_from_db_sync(telegram_id)
+                if result:
+                    logger.info(f"✅ Админ {telegram_id} удален из PostgreSQL")
+                else:
+                    logger.warning(f"⚠️ Админ {telegram_id} не удален из PostgreSQL (вернуло False)")
+                    return False
             except Exception as e:
-                logger.warning(f"Ошибка удаления администратора из PostgreSQL: {e}", exc_info=True)
+                logger.error(f"❌ Ошибка удаления администратора {telegram_id} из PostgreSQL: {e}", exc_info=True)
+                # Не обновляем память, если не удалось удалить из PostgreSQL
+                return False
+        
+        # Обновляем память только после успешного удаления из PostgreSQL
+        self.admins.remove(telegram_id)
         
         # Сохраняем в Google Sheets и файл
         self._save_admins()

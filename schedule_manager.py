@@ -850,11 +850,10 @@ class ScheduleManager:
                 else:
                     return False, 0  # Нет места
         
-        # Сохраняем обновленное расписание
-        schedule[day_name] = employees
+        # Формируем строку для сохранения
         employees_str = ', '.join(employees)
         
-        # Сохраняем в PostgreSQL (приоритет 1)
+        # Сохраняем в PostgreSQL ПЕРВЫМ (приоритет 1)
         pool = _get_pool()
         logger.info(f"🔄 Начинаю сохранение расписания {date_str} ({day_name}) в PostgreSQL...")
         logger.info(f"   USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
@@ -870,11 +869,20 @@ class ScheduleManager:
                     logger.info(f"✅ Расписание {date_str} ({day_name}) сохранено в PostgreSQL")
                 else:
                     logger.warning(f"⚠️ Расписание {date_str} ({day_name}) не сохранено в PostgreSQL (вернуло False)")
+                    # Не обновляем память, если не удалось сохранить в PostgreSQL
+                    return False, 0
             except Exception as e:
                 logger.error(f"❌ Критическая ошибка при сохранении расписания {date_str} в PostgreSQL: {e}", exc_info=True)
+                # Не обновляем память, если произошла ошибка
+                return False, 0
         else:
             pool = _get_pool()
             logger.warning(f"⚠️ PostgreSQL недоступен для сохранения расписания {date_str}: USE_POSTGRESQL={USE_POSTGRESQL}, _pool={pool is not None}, save_schedule_to_db={save_schedule_to_db is not None}")
+            # Не обновляем память, если PostgreSQL недоступен
+            return False, 0
+        
+        # Обновляем память только после успешного сохранения в PostgreSQL
+        schedule[day_name] = employees
         #     try:
         #         logger.debug(f"Сохранение расписания в Google Sheets для {date_str}, день: {day_name}")
         #         # Сохраняем только измененный день (как в файле)
