@@ -228,6 +228,9 @@ def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -
         if employees:
             # Форматируем список сотрудников с местами
             employees_with_places = []
+            used_places = set()  # Множество уже использованных мест
+            
+            # Сначала назначаем места сотрудникам, которые есть в default_schedule
             for emp in employees:
                 # Получаем простое имя из отформатированного (если есть username)
                 plain_name = schedule_manager.get_plain_name_from_formatted(emp)
@@ -241,21 +244,32 @@ def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -
                         plain_name_in_schedule = schedule_manager.get_plain_name_from_formatted(name)
                         if plain_name_in_schedule == plain_name:
                             place = place_key
+                            used_places.add(place)
                             break
-                
-                # Если место не найдено, используем порядковый номер в списке
-                if place is None:
-                    # Находим индекс сотрудника в списке
-                    try:
-                        index = employees.index(emp) + 1
-                        place = f"1.{index}"
-                    except ValueError:
-                        place = "1.999"  # Для сортировки
                 
                 employees_with_places.append((place, emp))
             
+            # Теперь назначаем места сотрудникам, у которых место не найдено в default_schedule
+            # (например, они запросили день через days_requested)
+            for i, (place, emp) in enumerate(employees_with_places):
+                if place is None:
+                    # Ищем свободное место (1.1, 1.2, ..., 1.8)
+                    from config import MAX_OFFICE_SEATS
+                    for place_num in range(1, MAX_OFFICE_SEATS + 1):
+                        candidate_place = f"1.{place_num}"
+                        if candidate_place not in used_places:
+                            place = candidate_place
+                            used_places.add(place)
+                            employees_with_places[i] = (place, emp)
+                            break
+                    
+                    # Если все места заняты (не должно быть), используем порядковый номер
+                    if place is None:
+                        place = f"1.{len(employees_with_places)}"
+                        employees_with_places[i] = (place, emp)
+            
             # Сортируем по номеру места (1.1, 1.2, 1.3...)
-            employees_with_places.sort(key=lambda x: parse_place_key(x[0]))
+            employees_with_places.sort(key=lambda x: parse_place_key(x[0]) if x[0] else (999, 999))
             
             # Форматируем отсортированный список - каждый сотрудник на отдельной строке
             day_lines = [f"{day}:"]
