@@ -1619,6 +1619,47 @@ class ScheduleManager:
                         logger.debug(f"  {employee_name} уже в расписании на {day}")
                     continue
                 
+                # Проверяем, был ли сотрудник в default_schedule на этот день
+                # Если да, и его место занято кем-то из очереди, он должен попасть в очередь
+                employee_was_in_default = False
+                employee_default_place = None
+                if day in default_schedule:
+                    places_dict = default_schedule[day]
+                    for place_key, name in places_dict.items():
+                        plain_name_in_schedule = self.get_plain_name_from_formatted(name)
+                        if plain_name_in_schedule == employee_name:
+                            employee_was_in_default = True
+                            employee_default_place = place_key
+                            logger.info(f"  🔍 {employee_name} был в default_schedule на {day}, его место: {employee_default_place}")
+                            break
+                
+                # Проверяем, занято ли его место из default_schedule кем-то другим
+                if employee_was_in_default and employee_default_place:
+                    # schedule[day] - это словарь мест {place_key: employee_name}
+                    current_occupant = schedule[day].get(employee_default_place, '').strip()
+                    logger.info(f"  🔍 Проверка места {employee_default_place}: текущий занят = '{current_occupant}', employee_name = '{employee_name}'")
+                    if current_occupant:
+                        # Место занято - проверяем, не самим ли сотрудником
+                        # current_occupant - это простое имя (без форматирования)
+                        logger.info(f"  🔍 Сравнение: '{current_occupant}' != '{employee_name}' = {current_occupant != employee_name}")
+                        if current_occupant != employee_name:
+                            # Место занято другим сотрудником (возможно, из очереди)
+                            # Сотрудник должен попасть в очередь, а не занимать другое место
+                            if telegram_id:
+                                logger.info(f"  ⚠️ Место {employee_default_place} сотрудника {employee_name} из default_schedule занято {current_occupant}, добавляем в очередь")
+                                result = self.add_to_queue(date, employee_name, telegram_id)
+                                if result:
+                                    logger.info(f"  ✅ {employee_name} успешно добавлен в очередь на {day}")
+                                else:
+                                    logger.warning(f"  ⚠️ Не удалось добавить {employee_name} в очередь на {day}")
+                            else:
+                                logger.warning(f"  ⚠️ Место {employee_default_place} занято, но нет telegram_id для добавления в очередь для {employee_name}")
+                            continue
+                        else:
+                            logger.info(f"  ℹ️ Место {employee_default_place} занято самим сотрудником {employee_name} - продолжаем")
+                    else:
+                        logger.info(f"  ℹ️ Место {employee_default_place} свободно - можно вернуть сотрудника на его место")
+                
                 # Проверяем, сколько мест уже занято (после заполнения из очереди)
                 occupied_count = len([name for name in schedule[day].values() if name])
                 
@@ -1638,14 +1679,31 @@ class ScheduleManager:
                     continue
                 
                 # Если занято <= 7 мест, добавляем сотрудника
-                # Ищем свободное место
-                free_place = self._find_free_place(schedule[day], department=1)
-                if free_place:
-                    schedule[day][free_place] = employee_name
-                    logger.info(f"  ✅ Добавлен {employee_name} в {day} на место {free_place}")
+                # Если сотрудник был в default_schedule, пытаемся вернуть его на его место
+                if employee_was_in_default and employee_default_place:
+                    # Проверяем, свободно ли его место
+                    if not schedule[day].get(employee_default_place, '').strip():
+                        # Место свободно - возвращаем сотрудника на его место
+                        schedule[day][employee_default_place] = employee_name
+                        logger.info(f"  ✅ Возвращен {employee_name} в {day} на его место {employee_default_place} из default_schedule")
+                    else:
+                        # Место занято (не должно быть такого случая после проверки выше, но на всякий случай)
+                        # Ищем свободное место
+                        free_place = self._find_free_place(schedule[day], department=1)
+                        if free_place:
+                            schedule[day][free_place] = employee_name
+                            logger.info(f"  ✅ Добавлен {employee_name} в {day} на место {free_place}")
+                        else:
+                            logger.warning(f"  ⚠️ Не найдено свободное место для {employee_name} в {day}, хотя занято {occupied_count} мест")
                 else:
-                    # Не должно быть такого случая, но на всякий случай
-                    logger.warning(f"  ⚠️ Не найдено свободное место для {employee_name} в {day}, хотя занято {occupied_count} мест")
+                    # Сотрудник не был в default_schedule - ищем свободное место
+                    free_place = self._find_free_place(schedule[day], department=1)
+                    if free_place:
+                        schedule[day][free_place] = employee_name
+                        logger.info(f"  ✅ Добавлен {employee_name} в {day} на место {free_place}")
+                    else:
+                        # Не должно быть такого случая, но на всякий случай
+                        logger.warning(f"  ⚠️ Не найдено свободное место для {employee_name} в {day}, хотя занято {occupied_count} мест")
         
         # Конвертируем обратно в формат списка для вывода
         formatted_schedule = {}
