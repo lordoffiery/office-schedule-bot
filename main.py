@@ -555,6 +555,10 @@ async def cmd_set_week_days(message: Message):
         days_to_request, days_to_skip
     )
     
+    # ВСЕГДА перестраиваем расписания для этой недели синхронно, чтобы schedules совпадал с requests
+    await rebuild_schedules_for_week_async(next_week_start, schedule_manager, employee_manager)
+    logger.info(f"Перестроено расписание для недели {next_week_start.strftime('%Y-%m-%d')} после set_week_days для {employee_name}")
+    
     # Формируем сообщение
     message_text = f"✅ Ваши дни на следующую неделю сохранены:\n\n"
     
@@ -714,103 +718,85 @@ async def process_skip_day(date: datetime, employee_name: str, user_id: int, emp
     if not day_name:
         return f"❌ Дата {date.strftime('%d.%m.%Y')} не является рабочим днем (Пн-Пт)"
     
-    # Если это текущая неделя - обновляем сохраненное расписание
-    # Сравниваем даты, а не datetime объекты, чтобы избежать проблем с часовыми поясами
-    if week_start.date() == current_week_start.date():
-        # Проверяем, находится ли пользователь в очереди
-        queue = schedule_manager.get_queue_for_date(date)
-        in_queue = any(
-            entry['employee_name'] == employee_name and entry['telegram_id'] == user_id
-            for entry in queue
-        )
-        
-        if in_queue:
-            # Пользователь в очереди - удаляем из очереди
-            schedule_manager.remove_from_queue(date, employee_name, user_id)
-            return f"✅ Удалены из очереди на {day_name} ({date.strftime('%d.%m.%Y')})"
-        else:
-            # Пользователь в расписании - удаляем из расписания
-            success, free_slots = schedule_manager.update_schedule_for_date(
-                date, employee_name, 'remove', employee_manager
-            )
-            
-            if success:
-                # Обрабатываем очередь - добавляем первого, если есть место
-                added_from_queue = schedule_manager.process_queue_for_date(date, employee_manager)
-                
-                if added_from_queue:
-                    # Уведомляем добавленного из очереди
-                    formatted_name = employee_manager.format_employee_name(added_from_queue['employee_name'])
-                    try:
-                        await bot.send_message(
-                            added_from_queue['telegram_id'],
-                            f"✅ Место освободилось!\n\n"
-                            f"📅 {day_to_short(day_name)} ({date.strftime('%d.%m.%Y')})\n"
-                            f"Вы автоматически добавлены в расписание."
-                        )
-                    except Exception as e:
-                        logger.error(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
-                    
-                    # Обновляем количество свободных мест после добавления из очереди
-                    schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
-                    employees = schedule.get(day_name, [])
-                    free_slots = MAX_OFFICE_SEATS - len(employees)
-                
-                # Уведомляем других сотрудников о свободном месте (если оно еще есть)
-                if free_slots > 0:
-                    await notification_manager.notify_available_slot(date, day_name, free_slots)
-                
-                if added_from_queue:
-                    return f"✅ Удалены из расписания на {day_name} ({date.strftime('%d.%m.%Y')})\n💡 Место занято сотрудником из очереди. 🆓 Свободных мест: {free_slots}"
-                else:
-                    return f"✅ Удалены из расписания на {day_name} ({date.strftime('%d.%m.%Y')})\n💡 Освобождено место. Другие сотрудники получили уведомление."
-            else:
-                return f"❌ Ошибка при обновлении расписания на {date.strftime('%d.%m.%Y')}"
+    # ВСЕГДА работаем через requests для единообразия
+    # Загружаем существующие заявки
+    requests = schedule_manager.load_requests_for_week(week_start)
+    
+    # Ищем заявку сотрудника
+    user_request = None
+    for req in requests:
+        if req['employee_name'] == employee_name and req['telegram_id'] == user_id:
+            user_request = req
+            break
+    
+    # Если заявки нет, создаем новую
+    if not user_request:
+        days_requested = []
+        days_skipped = [day_name]
     else:
-        # Это следующая неделя - работаем с заявками
-        # Загружаем существующие заявки
-        requests = schedule_manager.load_requests_for_week(week_start)
+        # Обновляем существующую заявку
+        days_requested = user_request['days_requested'].copy()
+        days_skipped = user_request['days_skipped'].copy()
         
-        # Ищем заявку сотрудника
-        user_request = None
-        for req in requests:
-            if req['employee_name'] == employee_name and req['telegram_id'] == user_id:
-                user_request = req
-                break
+        if day_name not in days_skipped:
+            days_skipped.append(day_name)
+        # Удаляем из запрошенных, если был там
+        if day_name in days_requested:
+            days_requested.remove(day_name)
+    
+    # Очищаем старые заявки и пересохраняем все
+    schedule_manager.clear_requests_for_week(week_start)
+    for req in requests:
+        if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
+            schedule_manager.save_request(
+                req['employee_name'], req['telegram_id'], week_start,
+                req['days_requested'], req['days_skipped']
+            )
+    # Сохраняем обновленную заявку сотрудника
+    schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
+    
+    # ВСЕГДА перестраиваем расписания для этой недели синхронно, чтобы schedules совпадал с requests
+    await rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager)
+    logger.info(f"Перестроено расписание для недели {week_start.strftime('%Y-%m-%d')} после skip_day {day_name} для {employee_name}")
+    
+    # Для текущей недели также обрабатываем очередь и отправляем уведомления
+    if week_start.date() == current_week_start.date():
+        # Проверяем, освободилось ли место и нужно ли обработать очередь
+        schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
+        employees = schedule.get(day_name, [])
+        free_slots = MAX_OFFICE_SEATS - len(employees)
         
-        # Если заявки нет, создаем новую
-        if not user_request:
-            days_requested = []
-            days_skipped = [day_name]
-        else:
-            # Обновляем существующую заявку
-            days_requested = user_request['days_requested'].copy()
-            days_skipped = user_request['days_skipped'].copy()
-            
-            if day_name not in days_skipped:
-                days_skipped.append(day_name)
-            # Удаляем из запрошенных, если был там
-            if day_name in days_requested:
-                days_requested.remove(day_name)
+        # Обрабатываем очередь - добавляем первого, если есть место
+        added_from_queue = schedule_manager.process_queue_for_date(date, employee_manager)
         
-        # Очищаем старые заявки и пересохраняем все
-        schedule_manager.clear_requests_for_week(week_start)
-        for req in requests:
-            if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
-                schedule_manager.save_request(
-                    req['employee_name'], req['telegram_id'], week_start,
-                    req['days_requested'], req['days_skipped']
+        if added_from_queue:
+            # Уведомляем добавленного из очереди
+            formatted_name = employee_manager.format_employee_name(added_from_queue['employee_name'])
+            try:
+                await bot.send_message(
+                    added_from_queue['telegram_id'],
+                    f"✅ Место освободилось!\n\n"
+                    f"📅 {day_to_short(day_name)} ({date.strftime('%d.%m.%Y')})\n"
+                    f"Вы автоматически добавлены в расписание."
                 )
-        # Сохраняем обновленную заявку сотрудника
-        schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления {added_from_queue['telegram_id']}: {e}")
+            
+            # Обновляем количество свободных мест после добавления из очереди
+            schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
+            employees = schedule.get(day_name, [])
+            free_slots = MAX_OFFICE_SEATS - len(employees)
         
-        # Автоматически перестраиваем расписания для этой недели в фоне
-        # Для skip_day всегда запускаем перестройку - если дня не было в default, ничего не изменится,
-        # если был - сотрудник будет удален из расписания
-        asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
-        logger.info(f"Запущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} после skip_day {day_name} для {employee_name}")
+        # Уведомляем других сотрудников о свободном месте (если оно еще есть)
+        if free_slots > 0:
+            await notification_manager.notify_available_slot(date, day_name, free_slots)
         
-        return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков на следующую неделю"
+        if added_from_queue:
+            return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков\n💡 Место занято сотрудником из очереди. 🆓 Свободных мест: {free_slots}"
+        else:
+            return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков\n💡 Освобождено место. Другие сотрудники получили уведомление."
+    else:
+        return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список пропусков"
 
 
 @dp.message(Command("skip_day"))
@@ -900,16 +886,58 @@ async def process_add_day(date: datetime, employee_name: str, user_id: int, empl
     if not day_name:
         return f"❌ Дата {date.strftime('%d.%m.%Y')} не является рабочим днем (Пн-Пт)"
     
-    # Если это текущая неделя - обновляем сохраненное расписание
-    # Сравниваем даты, а не datetime объекты, чтобы избежать проблем с часовыми поясами
-    if week_start.date() == current_week_start.date():
-        success, free_slots = schedule_manager.update_schedule_for_date(
-            date, employee_name, 'add', employee_manager
-        )
+    # ВСЕГДА работаем через requests для единообразия
+    # Загружаем существующие заявки
+    requests = schedule_manager.load_requests_for_week(week_start)
+    
+    # Ищем заявку сотрудника
+    user_request = None
+    for req in requests:
+        if req['employee_name'] == employee_name and req['telegram_id'] == user_id:
+            user_request = req
+            break
+    
+    # Если заявки нет, создаем новую
+    if not user_request:
+        days_requested = [day_name]
+        days_skipped = []
+    else:
+        # Обновляем существующую заявку
+        days_requested = user_request['days_requested'].copy()
+        days_skipped = user_request['days_skipped'].copy()
         
-        if success:
+        if day_name not in days_requested:
+            days_requested.append(day_name)
+        # Удаляем из пропусков, если был там
+        if day_name in days_skipped:
+            days_skipped.remove(day_name)
+    
+    # Очищаем старые заявки и пересохраняем все
+    schedule_manager.clear_requests_for_week(week_start)
+    for req in requests:
+        if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
+            schedule_manager.save_request(
+                req['employee_name'], req['telegram_id'], week_start,
+                req['days_requested'], req['days_skipped']
+            )
+    # Сохраняем обновленную заявку сотрудника
+    schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
+    
+    # ВСЕГДА перестраиваем расписания для этой недели синхронно, чтобы schedules совпадал с requests
+    await rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager)
+    logger.info(f"Перестроено расписание для недели {week_start.strftime('%Y-%m-%d')} после add_day {day_name} для {employee_name}")
+    
+    # Для текущей недели проверяем результат и обрабатываем очередь
+    if week_start.date() == current_week_start.date():
+        schedule = schedule_manager.load_schedule_for_date(date, employee_manager)
+        employees = schedule.get(day_name, [])
+        formatted_name = employee_manager.format_employee_name(employee_name)
+        is_in_schedule = formatted_name in employees
+        
+        if is_in_schedule:
             # Удаляем из очереди, если был там
             schedule_manager.remove_from_queue(date, employee_name, user_id)
+            free_slots = MAX_OFFICE_SEATS - len(employees)
             return f"✅ Добавлены в расписание на {day_name} ({date.strftime('%d.%m.%Y')})\n💡 Свободных мест осталось: {free_slots}"
         else:
             # Все места заняты - добавляем в очередь
@@ -928,66 +956,7 @@ async def process_add_day(date: datetime, employee_name: str, user_id: int, empl
             else:
                 return f"❌ Уже в очереди на {day_name} ({date.strftime('%d.%m.%Y')})"
     else:
-        # Это следующая неделя - работаем с заявками
-        # Загружаем существующие заявки
-        requests = schedule_manager.load_requests_for_week(week_start)
-        
-        # Ищем заявку сотрудника
-        user_request = None
-        for req in requests:
-            if req['employee_name'] == employee_name and req['telegram_id'] == user_id:
-                user_request = req
-                break
-        
-        # Если заявки нет, создаем новую
-        if not user_request:
-            days_requested = [day_name]
-            days_skipped = []
-        else:
-            # Обновляем существующую заявку
-            days_requested = user_request['days_requested'].copy()
-            days_skipped = user_request['days_skipped'].copy()
-            
-            if day_name not in days_requested:
-                days_requested.append(day_name)
-            # Удаляем из пропусков, если был там
-            if day_name in days_skipped:
-                days_skipped.remove(day_name)
-        
-        # Очищаем старые заявки и пересохраняем все
-        schedule_manager.clear_requests_for_week(week_start)
-        for req in requests:
-            if req['employee_name'] != employee_name or req['telegram_id'] != user_id:
-                schedule_manager.save_request(
-                    req['employee_name'], req['telegram_id'], week_start,
-                    req['days_requested'], req['days_skipped']
-                )
-        # Сохраняем обновленную заявку сотрудника
-        schedule_manager.save_request(employee_name, user_id, week_start, days_requested, days_skipped)
-        
-        # Автоматически перестраиваем расписания для этой недели в фоне
-        # ТОЛЬКО если запрошенный день был в default_schedule для этого сотрудника
-        # Иначе сотрудник может запросить день, которого у него нет в расписании, и это будет применено до воскресенья
-        default_schedule = schedule_manager.load_default_schedule()
-        employee_was_in_default = False
-        for day_n, places_dict in default_schedule.items():
-            if day_n == day_name:
-                for place_key, name in places_dict.items():
-                    plain_name = schedule_manager.get_plain_name_from_formatted(name)
-                    if plain_name == employee_name:
-                        employee_was_in_default = True
-                        break
-                if employee_was_in_default:
-                    break
-        
-        if employee_was_in_default:
-            # Сотрудник был в default_schedule на этот день - запускаем перестройку
-            asyncio.create_task(rebuild_schedules_for_week_async(week_start, schedule_manager, employee_manager))
-            logger.info(f"Запущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} (сотрудник {employee_name} был в default_schedule на {day_name})")
-        else:
-            logger.info(f"Пропущена автоматическая перестройка расписаний для недели {week_start.strftime('%Y-%m-%d')} (сотрудник {employee_name} НЕ был в default_schedule на {day_name})")
-        
-        return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список запрошенных дней на следующую неделю"
+        return f"✅ День {day_name} ({date.strftime('%d.%m.%Y')}) добавлен в список запрошенных дней"
 
 
 @dp.message(Command("add_day"))
