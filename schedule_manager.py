@@ -90,10 +90,7 @@ class ScheduleManager:
                 logger.warning(f"Не удалось инициализировать Google Sheets для расписаний: {e}")
         
         self._ensure_directories()
-        self._save_default_schedule()
-        # Обновляем имена в default_schedule.txt при старте, если есть employee_manager
-        if employee_manager:
-            self._update_all_employee_names_in_default_schedule()
+        # Не сохраняем и не обновляем файлы - только PostgreSQL
     
     def _ensure_directories(self):
         """Создать необходимые директории"""
@@ -167,80 +164,35 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки расписания по умолчанию из Google Sheets: {e}, используем файлы")
         
-        # Загружаем из файла
-        if os.path.exists(DEFAULT_SCHEDULE_FILE):
-            try:
-                # Пытаемся загрузить как JSON
-                with open(DEFAULT_SCHEDULE_FILE, 'r', encoding='utf-8') as f:
-                    content = f.read().strip()
-                    if content.startswith('{'):
-                        # JSON формат
-                        schedule = json.loads(content)
-                    else:
-                        # Старый формат (текстовый) - конвертируем
-                        schedule = {}
-                        current_day = None
-                        for line in content.split('\n'):
-                            line = line.strip()
-                            if not line:
-                                continue
-                            if line in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                                current_day = line
-                                schedule[current_day] = {}
-                            elif current_day and ':' in line:
-                                # Формат: "Понедельник: Вася, Дима Ч, ..."
-                                if line.startswith(current_day + ':'):
-                                    employees_str = line.split(':', 1)[1].strip()
-                                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                                    places_dict = {}
-                                    for i, emp in enumerate(employees, 1):
-                                        places_dict[f'1.{i}'] = emp
-                                    schedule[current_day] = places_dict
-                                else:
-                                    # Просто список через запятую
-                                    employees = [e.strip() for e in line.split(',') if e.strip()]
-                                    places_dict = {}
-                                    for i, emp in enumerate(employees, 1):
-                                        places_dict[f'1.{i}'] = emp
-                                    schedule[current_day] = places_dict
-            except (json.JSONDecodeError, Exception) as e:
-                logger.error(f"Ошибка загрузки расписания по умолчанию: {e}")
-        
-        # Если не загрузилось из файла, пробуем загрузить из Google Sheets
-        # (но только если USE_GOOGLE_SHEETS_FOR_READS включен и нет буферизованных операций)
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и PostgreSQL недоступен)
         if USE_GOOGLE_SHEETS_FOR_READS and not schedule and self.sheets_manager and self.sheets_manager.is_available():
-            # Проверяем, есть ли буферизованные операции для листа default_schedule
-            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_DEFAULT_SCHEDULE)
-            
-            if not has_buffered:
-                try:
-                    rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
-                    rows = filter_empty_rows(rows)
-                    start_idx, _ = get_header_start_idx(rows, ['day', 'day_name', 'День'])
-                    for row in rows[start_idx:]:
-                        if len(row) >= 2:
-                            try:
-                                day_name = row[0].strip()
-                                # Пытаемся распарсить как JSON
-                                if row[1].strip().startswith('{'):
-                                    places_dict = json.loads(row[1].strip())
-                                    schedule[day_name] = places_dict
-                                else:
-                                    # Старый формат (список через запятую) - конвертируем
-                                    employees_str = row[1].strip() if row[1] else ""
-                                    employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                                    # Конвертируем в новый формат
-                                    places_dict = {}
-                                    for i, emp in enumerate(employees, 1):
-                                        places_dict[f'1.{i}'] = emp
-                                    schedule[day_name] = places_dict
-                            except (ValueError, IndexError, json.JSONDecodeError) as e:
-                                logger.warning(f"Ошибка парсинга строки расписания: {e}")
-                                continue
-                except Exception as e:
-                    logger.warning(f"Ошибка загрузки расписания по умолчанию из Google Sheets: {e}, используем config")
-            else:
-                logger.debug(f"Есть буферизованные операции для {SHEET_DEFAULT_SCHEDULE}, пропускаем загрузку из Google Sheets")
+            # Не проверяем буферизованные операции - работаем только с PostgreSQL
+            try:
+                rows = self.sheets_manager.read_all_rows(SHEET_DEFAULT_SCHEDULE)
+                rows = filter_empty_rows(rows)
+                start_idx, _ = get_header_start_idx(rows, ['day', 'day_name', 'День'])
+                for row in rows[start_idx:]:
+                    if len(row) >= 2:
+                        try:
+                            day_name = row[0].strip()
+                            # Пытаемся распарсить как JSON
+                            if row[1].strip().startswith('{'):
+                                places_dict = json.loads(row[1].strip())
+                                schedule[day_name] = places_dict
+                            else:
+                                # Старый формат (список через запятую) - конвертируем
+                                employees_str = row[1].strip() if row[1] else ""
+                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                                # Конвертируем в новый формат
+                                places_dict = {}
+                                for i, emp in enumerate(employees, 1):
+                                    places_dict[f'1.{i}'] = emp
+                                schedule[day_name] = places_dict
+                        except (ValueError, IndexError, json.JSONDecodeError) as e:
+                            logger.warning(f"Ошибка парсинга строки расписания: {e}")
+                            continue
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки расписания по умолчанию из Google Sheets: {e}, используем config")
         
         # Если не загрузилось, используем из config
         if not schedule:
@@ -267,12 +219,7 @@ class ScheduleManager:
             except Exception as e:
                 logger.error(f"❌ Ошибка сохранения расписания по умолчанию в PostgreSQL: {e}", exc_info=True)
         
-        # Сохраняем в файл как JSON
-        try:
-            with open(DEFAULT_SCHEDULE_FILE, 'w', encoding='utf-8') as f:
-                json.dump(schedule, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"Ошибка сохранения расписания по умолчанию в файл: {e}")
+        # Не сохраняем в файл - только PostgreSQL
     
     def get_plain_name_from_formatted(self, formatted_name: str) -> str:
         """Извлечь простое имя из отформатированного (например, 'Рома(@rsidorenkov)' -> 'Рома')"""
@@ -483,23 +430,24 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
-        # ПРИОРИТЕТ 2: Локальные файлы (они могут содержать актуальные данные, которые еще не сохранены в PostgreSQL/Google Sheets)
-        schedule_file = os.path.join(SCHEDULES_DIR, f"{date_str}.txt")
-        if os.path.exists(schedule_file):
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и PostgreSQL недоступен)
+        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
+            # Не проверяем буферизованные операции - работаем только с PostgreSQL
             try:
-                with open(schedule_file, 'r', encoding='utf-8') as f:
-                    current_day = None
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        if line in ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница']:
-                            current_day = line
-                            schedule[current_day] = []
-                        elif current_day:
-                            employees = [e.strip() for e in line.split(',') if e.strip()]
-                            # Если имена уже отформатированы (содержат "(@"), оставляем как есть
-                            # Иначе форматируем, если есть employee_manager
+                rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
+                rows = filter_empty_rows(rows)
+                start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
+                
+                # Ищем запись для нужной даты
+                for row in rows[start_idx:]:
+                    if len(row) >= 3 and row[0] and row[0].strip() == date_str:
+                        # Нашли запись для этой даты
+                        day_name = row[1].strip() if len(row) > 1 and row[1] else None
+                        employees_str = row[2].strip() if len(row) > 2 and row[2] else ""
+                        
+                        if day_name and employees_str:
+                            employees = [e.strip() for e in employees_str.split(',') if e.strip()]
+                            # Форматируем имена, если нужно
                             if employee_manager:
                                 formatted_employees = []
                                 for emp in employees:
@@ -508,52 +456,15 @@ class ScheduleManager:
                                         formatted_employees.append(emp)
                                     else:
                                         formatted_employees.append(employee_manager.format_employee_name(emp))
-                                schedule[current_day] = formatted_employees
+                                schedule[day_name] = formatted_employees
                             else:
-                                schedule[current_day] = employees
-                if schedule:
-                    return schedule
-            except Exception as e:
-                logger.error(f"Ошибка загрузки расписания на {date_str}: {e}")
-        
-        # ПРИОРИТЕТ 3: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен)
-        if USE_GOOGLE_SHEETS_FOR_READS and self.sheets_manager and self.sheets_manager.is_available():
-            # Проверяем, есть ли буферизованные операции для schedules
-            # Если есть, приоритет отдаем локальным файлам (которые мы уже проверили выше)
-            has_buffered = self.sheets_manager.has_buffered_operations_for_sheet(SHEET_SCHEDULES)
-            if not has_buffered:
-                try:
-                    rows = self.sheets_manager.read_all_rows(SHEET_SCHEDULES)
-                    rows = filter_empty_rows(rows)
-                    start_idx, has_header = get_header_start_idx(rows, ['date', 'date_str', 'Дата'])
-                    
-                    # Ищем запись для нужной даты
-                    for row in rows[start_idx:]:
-                        if len(row) >= 3 and row[0] and row[0].strip() == date_str:
-                            # Нашли запись для этой даты
-                            day_name = row[1].strip() if len(row) > 1 and row[1] else None
-                            employees_str = row[2].strip() if len(row) > 2 and row[2] else ""
+                                schedule[day_name] = employees
                             
-                            if day_name and employees_str:
-                                employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                                # Форматируем имена, если нужно
-                                if employee_manager:
-                                    formatted_employees = []
-                                    for emp in employees:
-                                        # Проверяем, отформатировано ли уже имя
-                                        if '(@' in emp and emp.endswith(')'):
-                                            formatted_employees.append(emp)
-                                        else:
-                                            formatted_employees.append(employee_manager.format_employee_name(emp))
-                                    schedule[day_name] = formatted_employees
-                                else:
-                                    schedule[day_name] = employees
-                                
-                                if schedule:
-                                    logger.info(f"Загружено расписание для {date_str} из Google Sheets")
-                                    return schedule
-                except Exception as e:
-                    logger.warning(f"Ошибка загрузки расписания на {date_str} из Google Sheets: {e}, используем расписание по умолчанию")
+                            if schedule:
+                                logger.info(f"Загружено расписание для {date_str} из Google Sheets")
+                                return schedule
+            except Exception as e:
+                logger.warning(f"Ошибка загрузки расписания на {date_str} из Google Sheets: {e}, используем расписание по умолчанию")
         
         # Если файла нет и в Google Sheets нет, возвращаем расписание по умолчанию
         default_schedule = self.load_default_schedule()
@@ -1196,13 +1107,7 @@ class ScheduleManager:
         #     except Exception as e:
         #         logger.warning(f"Ошибка сохранения заявки в Google Sheets: {e}")
         
-        # Сохраняем в файл
-        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
-        try:
-            with open(request_file, 'a', encoding='utf-8') as f:
-                f.write(f"{employee_name}:{telegram_id}:{week_str}:{days_req_str}:{days_skip_str}\n")
-        except Exception as e:
-            logger.error(f"Ошибка сохранения заявки в файл: {e}")
+        # Не сохраняем в файл - только PostgreSQL
     
     def load_requests_for_week(self, week_start: datetime) -> List[Dict]:
         """Загрузить все заявки на неделю из PostgreSQL (приоритет), Google Sheets или файла (схлопывает дубликаты)"""
@@ -1243,49 +1148,7 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
         
-        # ПРИОРИТЕТ 2: Локальные файлы
-        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
-        if os.path.exists(request_file):
-            try:
-                with open(request_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        parts = line.split(':')
-                        if len(parts) >= 5:
-                            employee_name = parts[0]
-                            telegram_id = int(parts[1])
-                            week_start_str = parts[2]
-                            days_requested = [d for d in parts[3].split(',') if d]
-                            days_skipped = [d for d in parts[4].split(',') if d]
-                            
-                            key = (employee_name, telegram_id)
-                            
-                            # Если уже есть заявка для этого сотрудника, объединяем
-                            if key in requests_dict:
-                                existing = requests_dict[key]
-                                combined_requested = list(dict.fromkeys(existing['days_requested'] + days_requested))
-                                combined_skipped = list(dict.fromkeys(existing['days_skipped'] + days_skipped))
-                                combined_requested = [d for d in combined_requested if d not in combined_skipped]
-                                
-                                requests_dict[key] = {
-                                    'employee_name': employee_name,
-                                    'telegram_id': telegram_id,
-                                    'days_requested': combined_requested,
-                                    'days_skipped': combined_skipped
-                                }
-                            else:
-                                requests_dict[key] = {
-                                    'employee_name': employee_name,
-                                    'telegram_id': telegram_id,
-                                    'days_requested': days_requested,
-                                    'days_skipped': days_skipped
-                                }
-            except Exception as e:
-                logger.error(f"Ошибка загрузки заявок: {e}")
-        
-        # ПРИОРИТЕТ 3: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и локальных файлов нет)
+        # ПРИОРИТЕТ 2: Google Sheets (только если USE_GOOGLE_SHEETS_FOR_READS включен и PostgreSQL недоступен)
         if USE_GOOGLE_SHEETS_FOR_READS and not requests_dict and self.sheets_manager and self.sheets_manager.is_available():
             try:
                 rows = self.sheets_manager.read_all_rows(SHEET_REQUESTS)
@@ -1360,13 +1223,7 @@ class ScheduleManager:
         #     except Exception as e:
         #         logger.warning(f"Ошибка очистки заявок в Google Sheets: {e}")
         
-        # Удаляем файл
-        request_file = os.path.join(REQUESTS_DIR, f"{week_str}_requests.txt")
-        if os.path.exists(request_file):
-            try:
-                os.remove(request_file)
-            except Exception as e:
-                logger.error(f"Ошибка удаления файла заявок: {e}")
+        # Не удаляем файлы - работаем только с PostgreSQL
     
     def _calculate_employee_days_count(self, default_schedule: Dict[str, Dict[str, str]], employee_name: str) -> int:
         """
