@@ -138,6 +138,9 @@ def get_main_keyboard(user_id: int) -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="📊 Список админов", callback_data="cmd_admin_list_admins"),
                 InlineKeyboardButton(text="🔄 Синхронизация", callback_data="cmd_admin_sync_from_sheets")
+            ],
+            [
+                InlineKeyboardButton(text="🔄 Перезагрузить из БД", callback_data="cmd_admin_reload_from_db")
             ]
         ]
         keyboard.inline_keyboard.extend(admin_buttons)
@@ -401,7 +404,9 @@ async def cmd_help(message: Message):
             "/admin_rebuild_schedules_from_requests - Перестроить расписания на основе заявок\n"
             "   Перестраивает schedules для будущих недель на основе requests (источник истины)\n\n"
             "/admin_sync_from_sheets - Синхронизировать данные из Google Sheets в PostgreSQL\n"
-            "   Используйте после ручного изменения данных в Google Sheets"
+            "   Используйте после ручного изменения данных в Google Sheets\n\n"
+            "/admin_reload_from_db - Принудительно перезагрузить все данные из PostgreSQL\n"
+            "   Используйте после обновления данных в PostgreSQL или после деплоя"
         )
     
     keyboard = get_main_keyboard(user_id)
@@ -2082,6 +2087,63 @@ async def cmd_admin_refresh_schedules(message: Message):
     await sync_postgresql_to_sheets()
 
 
+@dp.message(Command("admin_reload_from_db"))
+async def cmd_admin_reload_from_db(message: Message):
+    """Принудительно перезагрузить все данные из PostgreSQL (только для админов)"""
+    user_id = message.from_user.id
+    user_info = get_user_info(message)
+    
+    if not admin_manager.is_admin(user_id):
+        response = "Эта команда доступна только администраторам"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
+        return
+    
+    response = "🔄 Начинаю перезагрузку данных из PostgreSQL..."
+    await message.reply(response)
+    log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
+    
+    try:
+        # Проверяем доступность PostgreSQL
+        from database import _pool
+        if not _pool:
+            response = "❌ PostgreSQL не инициализирован. Проверьте подключение к базе данных."
+            await message.reply(response)
+            log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
+            return
+        
+        # Перезагружаем сотрудников
+        logger.info("Перезагрузка сотрудников из PostgreSQL (команда /admin_reload_from_db)")
+        employee_manager.reload_employees()
+        employee_manager.reload_pending_employees()
+        employees_count = len(employee_manager.employees) if hasattr(employee_manager, 'employees') else 0
+        
+        # Перезагружаем администраторов
+        logger.info("Перезагрузка администраторов из PostgreSQL (команда /admin_reload_from_db)")
+        admin_manager.reload_admins()
+        admins_count = len(admin_manager.admins) if hasattr(admin_manager, 'admins') else 0
+        
+        # Загружаем расписание по умолчанию
+        logger.info("Перезагрузка расписания по умолчанию из PostgreSQL (команда /admin_reload_from_db)")
+        default_schedule = schedule_manager.load_default_schedule()
+        default_schedule_days = len(default_schedule) if default_schedule else 0
+        
+        response = (
+            f"✅ Данные успешно перезагружены из PostgreSQL:\n\n"
+            f"👥 Сотрудники: {employees_count} записей\n"
+            f"👑 Администраторы: {admins_count} записей\n"
+            f"📋 Расписание по умолчанию: {default_schedule_days} дней\n\n"
+            f"Все данные в памяти обновлены."
+        )
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
+    except Exception as e:
+        logger.error(f"Ошибка при перезагрузке данных из PostgreSQL: {e}", exc_info=True)
+        response = f"❌ Ошибка при перезагрузке данных из PostgreSQL: {e}"
+        await message.reply(response)
+        log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
+
+
 @dp.message(Command("admin_skip_day"))
 async def cmd_admin_skip_day(message: Message):
     """Пропустить день для сотрудника (только для админов, можно указать несколько дат)"""
@@ -2524,12 +2586,15 @@ async def handle_callback(callback: CallbackQuery):
         elif command == "cmd_admin_sync_from_sheets":
             logger.info(f"Выполняю команду admin_sync_from_sheets для пользователя {user_id}")
             await cmd_admin_sync_from_sheets(fake_message)
+        elif command == "cmd_admin_reload_from_db":
+            logger.info(f"Выполняю команду admin_reload_from_db для пользователя {user_id}")
+            await cmd_admin_reload_from_db(fake_message)
         else:
             logger.warning(f"Неизвестная команда callback: {command}")
             await callback.answer("Неизвестная команда", show_alert=True)
         
         # Синхронизируем только если команда изменяет данные
-        # Команды, которые только читают: cmd_my_schedule, cmd_full_schedule, cmd_help, cmd_admin_list_admins
+        # Команды, которые только читают: cmd_my_schedule, cmd_full_schedule, cmd_help, cmd_admin_list_admins, cmd_admin_reload_from_db
         # Команды, которые изменяют: cmd_set_week_days, cmd_add_day, cmd_skip_day (через подсказки не изменяют)
         # Для команд с подсказками синхронизация не нужна, так как они только показывают инструкции
     except Exception as e:
@@ -2630,17 +2695,23 @@ async def main():
             logger.info("Загрузка данных из локальных файлов при старте...")
     try:
         # Перезагружаем данные сотрудников
+        logger.info("📋 Загружаем данные сотрудников из PostgreSQL...")
         employee_manager.reload_employees()
         employee_manager.reload_pending_employees()
-        logger.info("✅ Сотрудники загружены")
+        employees_count = len(employee_manager.employees) if hasattr(employee_manager, 'employees') else 0
+        logger.info(f"✅ Сотрудники загружены: {employees_count} записей")
         
         # Перезагружаем администраторов
+        logger.info("📋 Загружаем администраторов из PostgreSQL...")
         admin_manager.reload_admins()
-        logger.info("✅ Администраторы загружены")
+        admins_count = len(admin_manager.admins) if hasattr(admin_manager, 'admins') else 0
+        logger.info(f"✅ Администраторы загружены: {admins_count} записей")
         
-        # Загружаем расписание по умолчанию (это вызовет загрузку из Google Sheets)
-        schedule_manager.load_default_schedule()
-        logger.info("✅ Расписание по умолчанию загружено")
+        # Загружаем расписание по умолчанию
+        logger.info("📋 Загружаем расписание по умолчанию из PostgreSQL...")
+        default_schedule = schedule_manager.load_default_schedule()
+        default_schedule_days = len(default_schedule) if default_schedule else 0
+        logger.info(f"✅ Расписание по умолчанию загружено: {default_schedule_days} дней")
         
         # Предзагружаем расписания для текущей и следующей недели
         # Это гарантирует, что данные будут доступны при первом вызове команд
