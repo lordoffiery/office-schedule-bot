@@ -89,12 +89,6 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Не удалось инициализировать Google Sheets для расписаний: {e}")
         
-        # Кэш для schedules и requests в памяти
-        # Формат: {date_str: {day_name: [employees]}} для schedules
-        # Формат: {week_start_str: [requests]} для requests
-        self._schedules_cache: Dict[str, Dict[str, List[str]]] = {}
-        self._requests_cache: Dict[str, List[Dict]] = {}
-        
         self._ensure_directories()
         self._save_default_schedule()
         # Обновляем имена в default_schedule.txt при старте, если есть employee_manager
@@ -455,12 +449,6 @@ class ScheduleManager:
     def load_schedule_for_date(self, date: datetime, employee_manager=None) -> Dict[str, List[str]]:
         """Загрузить расписание на конкретную дату"""
         date_str = date.strftime('%Y-%m-%d')
-        
-        # ПРИОРИТЕТ 0: Проверяем кэш в памяти
-        if date_str in self._schedules_cache:
-            logger.debug(f"Используем расписание для {date_str} из кэша")
-            return self._schedules_cache[date_str].copy()
-        
         schedule = {}
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
@@ -491,8 +479,6 @@ class ScheduleManager:
                     
                     if schedule:
                         logger.debug(f"Загружено расписание для {date_str} из PostgreSQL")
-                        # Сохраняем в кэш
-                        self._schedules_cache[date_str] = schedule.copy()
                         return schedule
             except Exception as e:
                 logger.warning(f"Ошибка загрузки расписания на {date_str} из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
@@ -526,8 +512,6 @@ class ScheduleManager:
                             else:
                                 schedule[current_day] = employees
                 if schedule:
-                    # Сохраняем в кэш
-                    self._schedules_cache[date_str] = schedule.copy()
                     return schedule
             except Exception as e:
                 logger.error(f"Ошибка загрузки расписания на {date_str}: {e}")
@@ -567,8 +551,6 @@ class ScheduleManager:
                                 
                                 if schedule:
                                     logger.info(f"Загружено расписание для {date_str} из Google Sheets")
-                                    # Сохраняем в кэш
-                                    self._schedules_cache[date_str] = schedule.copy()
                                     return schedule
                 except Exception as e:
                     logger.warning(f"Ошибка загрузки расписания на {date_str} из Google Sheets: {e}, используем расписание по умолчанию")
@@ -690,10 +672,6 @@ class ScheduleManager:
                             result = save_schedule_to_db_sync(date_str, day_name, employees_str)
                             if result:
                                 logger.info(f"✅ Сохранено измененное расписание для {date_str} ({day_name}) в PostgreSQL")
-                                # Обновляем кэш
-                                if date_str not in self._schedules_cache:
-                                    self._schedules_cache[date_str] = {}
-                                self._schedules_cache[date_str][day_name] = employees
                             else:
                                 logger.warning(f"⚠️ Не удалось сохранить расписание для {date_str} ({day_name}) в PostgreSQL (вернуло False)")
                         except Exception as e:
@@ -1192,9 +1170,6 @@ class ScheduleManager:
                 result = save_request_to_db_sync(week_str, employee_name, telegram_id, days_requested, days_skipped)
                 if result:
                     logger.info(f"✅ Заявка сохранена в PostgreSQL: {employee_name} (неделя {week_str})")
-                    # Обновляем кэш: удаляем старую запись для этой недели, чтобы при следующем запросе загрузилась актуальная
-                    if week_str in self._requests_cache:
-                        del self._requests_cache[week_str]
                 else:
                     logger.warning(f"⚠️ Заявка не сохранена в PostgreSQL (вернуло False): {employee_name} (неделя {week_str})")
             except Exception as e:
@@ -1232,12 +1207,6 @@ class ScheduleManager:
     def load_requests_for_week(self, week_start: datetime) -> List[Dict]:
         """Загрузить все заявки на неделю из PostgreSQL (приоритет), Google Sheets или файла (схлопывает дубликаты)"""
         week_str = week_start.strftime('%Y-%m-%d')
-        
-        # ПРИОРИТЕТ 0: Проверяем кэш в памяти
-        if week_str in self._requests_cache:
-            logger.debug(f"Используем заявки для недели {week_str} из кэша")
-            return self._requests_cache[week_str].copy()
-        
         requests_dict = {}  # Ключ: (employee_name, telegram_id), значение: заявка
         
         # ПРИОРИТЕТ 1: PostgreSQL (если доступен)
@@ -1270,8 +1239,6 @@ class ScheduleManager:
                     if requests_dict:
                         result = list(requests_dict.values())
                         logger.debug(f"Заявки для недели {week_str} загружены из PostgreSQL: {len(result)} записей")
-                        # Сохраняем в кэш
-                        self._requests_cache[week_str] = result.copy()
                         return result
             except Exception as e:
                 logger.warning(f"Ошибка загрузки заявок из PostgreSQL: {type(e).__name__}: {e}", exc_info=True)
@@ -1361,19 +1328,11 @@ class ScheduleManager:
             except Exception as e:
                 logger.warning(f"Ошибка загрузки заявок из Google Sheets: {e}")
         
-        result = list(requests_dict.values())
-        # Сохраняем в кэш, если есть данные
-        if result:
-            self._requests_cache[week_str] = result.copy()
-        return result
+        return list(requests_dict.values())
     
     def clear_requests_for_week(self, week_start: datetime):
         """Очистить заявки на неделю (после формирования расписания) в PostgreSQL, Google Sheets и файл"""
         week_str = week_start.strftime('%Y-%m-%d')
-        
-        # Очищаем кэш
-        if week_str in self._requests_cache:
-            del self._requests_cache[week_str]
         
         # Удаляем из PostgreSQL (приоритет 1)
         if USE_POSTGRESQL:
@@ -1408,140 +1367,6 @@ class ScheduleManager:
                 os.remove(request_file)
             except Exception as e:
                 logger.error(f"Ошибка удаления файла заявок: {e}")
-    
-    def load_all_schedules_to_cache(self, employee_manager=None, days_ahead: int = 60):
-        """
-        Загрузить все schedules из PostgreSQL в кэш памяти
-        
-        Args:
-            employee_manager: Менеджер сотрудников для форматирования имен
-            days_ahead: Количество дней вперед для загрузки (по умолчанию 60)
-        """
-        if not USE_POSTGRESQL:
-            logger.warning("PostgreSQL недоступен, пропускаем загрузку schedules в кэш")
-            return
-        
-        try:
-            from database_sync import _get_connection
-            from psycopg2.extras import RealDictCursor
-            from datetime import date, timedelta
-            
-            conn = _get_connection()
-            if not conn:
-                logger.warning("Не удалось получить подключение к PostgreSQL для загрузки schedules")
-                return
-            
-            today = date.today()
-            end_date = today + timedelta(days=days_ahead)
-            
-            logger.info(f"Загружаем schedules из PostgreSQL в кэш (с {today} по {end_date})...")
-            
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT date, day_name, employees
-                    FROM schedules
-                    WHERE date >= %s AND date <= %s
-                    ORDER BY date
-                """, (today, end_date))
-                
-                rows = cur.fetchall()
-                loaded_count = 0
-                
-                for row in rows:
-                    date_str = row['date'].strftime('%Y-%m-%d')
-                    day_name = row['day_name']
-                    employees_str = row['employees']
-                    
-                    if employees_str:
-                        employees = [e.strip() for e in employees_str.split(',') if e.strip()]
-                        # Форматируем имена, если нужно
-                        if employee_manager:
-                            formatted_employees = []
-                            for emp in employees:
-                                if '(@' in emp and emp.endswith(')'):
-                                    formatted_employees.append(emp)
-                                else:
-                                    formatted_employees.append(employee_manager.format_employee_name(emp))
-                            employees = formatted_employees
-                        
-                        if date_str not in self._schedules_cache:
-                            self._schedules_cache[date_str] = {}
-                        self._schedules_cache[date_str][day_name] = employees
-                        loaded_count += 1
-                
-                logger.info(f"✅ Загружено {loaded_count} schedules в кэш")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки schedules в кэш: {e}", exc_info=True)
-    
-    def load_all_requests_to_cache(self, weeks_ahead: int = 8):
-        """
-        Загрузить все requests из PostgreSQL в кэш памяти
-        
-        Args:
-            weeks_ahead: Количество недель вперед для загрузки (по умолчанию 8)
-        """
-        if not USE_POSTGRESQL:
-            logger.warning("PostgreSQL недоступен, пропускаем загрузку requests в кэш")
-            return
-        
-        try:
-            from database_sync import _get_connection
-            from psycopg2.extras import RealDictCursor
-            from datetime import date, timedelta
-            
-            conn = _get_connection()
-            if not conn:
-                logger.warning("Не удалось получить подключение к PostgreSQL для загрузки requests")
-                return
-            
-            today = date.today()
-            # Находим начало текущей недели (понедельник)
-            days_since_monday = today.weekday()
-            current_week_start = today - timedelta(days=days_since_monday)
-            end_week_start = current_week_start + timedelta(weeks=weeks_ahead)
-            
-            logger.info(f"Загружаем requests из PostgreSQL в кэш (с {current_week_start} по {end_week_start})...")
-            
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT week_start, employee_name, telegram_id, days_requested, days_skipped
-                    FROM requests
-                    WHERE week_start >= %s AND week_start <= %s
-                    ORDER BY week_start, employee_name
-                """, (current_week_start, end_week_start))
-                
-                rows = cur.fetchall()
-                requests_by_week = {}
-                
-                for row in rows:
-                    week_str = row['week_start'].strftime('%Y-%m-%d')
-                    days_requested = row['days_requested'].split(',') if row['days_requested'] else []
-                    days_skipped = row['days_skipped'].split(',') if row['days_skipped'] else []
-                    
-                    if week_str not in requests_by_week:
-                        requests_by_week[week_str] = []
-                    
-                    requests_by_week[week_str].append({
-                        'employee_name': row['employee_name'],
-                        'telegram_id': row['telegram_id'],
-                        'days_requested': [d.strip() for d in days_requested if d.strip()],
-                        'days_skipped': [d.strip() for d in days_skipped if d.strip()]
-                    })
-                
-                # Сохраняем в кэш
-                for week_str, requests_list in requests_by_week.items():
-                    self._requests_cache[week_str] = requests_list
-                
-                total_requests = sum(len(reqs) for reqs in requests_by_week.values())
-                logger.info(f"✅ Загружено {total_requests} requests для {len(requests_by_week)} недель в кэш")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки requests в кэш: {e}", exc_info=True)
-    
-    def clear_cache(self):
-        """Очистить весь кэш schedules и requests"""
-        self._schedules_cache.clear()
-        self._requests_cache.clear()
-        logger.info("Кэш schedules и requests очищен")
     
     def _calculate_employee_days_count(self, default_schedule: Dict[str, Dict[str, str]], employee_name: str) -> int:
         """

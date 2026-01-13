@@ -2128,25 +2128,13 @@ async def cmd_admin_reload_from_db(message: Message):
         default_schedule = schedule_manager.load_default_schedule()
         default_schedule_days = len(default_schedule) if default_schedule else 0
         
-        # Очищаем и перезагружаем кэш schedules и requests
-        logger.info("Очистка и перезагрузка кэша schedules и requests (команда /admin_reload_from_db)")
-        schedule_manager.clear_cache()
-        schedule_manager.load_all_schedules_to_cache(employee_manager, days_ahead=60)
-        schedule_manager.load_all_requests_to_cache(weeks_ahead=8)
-        
-        # Подсчитываем загруженные данные
-        schedules_count = len(schedule_manager._schedules_cache) if hasattr(schedule_manager, '_schedules_cache') else 0
-        requests_count = sum(len(reqs) for reqs in schedule_manager._requests_cache.values()) if hasattr(schedule_manager, '_requests_cache') else 0
-        requests_weeks = len(schedule_manager._requests_cache) if hasattr(schedule_manager, '_requests_cache') else 0
-        
         response = (
             f"✅ Данные успешно перезагружены из PostgreSQL:\n\n"
             f"👥 Сотрудники: {employees_count} записей\n"
             f"👑 Администраторы: {admins_count} записей\n"
-            f"📋 Расписание по умолчанию: {default_schedule_days} дней\n"
-            f"📅 Schedules в кэше: {schedules_count} дат\n"
-            f"📝 Requests в кэше: {requests_count} заявок для {requests_weeks} недель\n\n"
-            f"Все данные в памяти обновлены."
+            f"📋 Расписание по умолчанию: {default_schedule_days} дней\n\n"
+            f"Все данные в памяти обновлены.\n"
+            f"📅 Schedules и 📝 Requests всегда загружаются напрямую из PostgreSQL при каждом запросе."
         )
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
@@ -2725,13 +2713,6 @@ async def main():
         default_schedule = schedule_manager.load_default_schedule()
         default_schedule_days = len(default_schedule) if default_schedule else 0
         logger.info(f"✅ Расписание по умолчанию загружено: {default_schedule_days} дней")
-        
-        # Загружаем все schedules и requests в память из PostgreSQL
-        if use_postgresql:
-            logger.info("📋 Загружаем все schedules и requests из PostgreSQL в память...")
-            schedule_manager.load_all_schedules_to_cache(employee_manager, days_ahead=60)
-            schedule_manager.load_all_requests_to_cache(weeks_ahead=8)
-            logger.info("✅ Все schedules и requests загружены в память")
         
         # Предзагружаем расписания для текущей и следующей недели
         # Это гарантирует, что данные будут доступны при первом вызове команд
