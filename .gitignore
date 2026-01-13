@@ -33,3 +33,8 @@ yc_sa_key_minified.json
 .DS_Store
 Thumbs.db
 
+# Test scripts (local debugging)
+debug_*.py
+test_*.py
+!test_rebuild_*.py
+
