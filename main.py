@@ -1751,10 +1751,8 @@ async def rebuild_schedules_for_week_async(week_start: datetime, schedule_manage
         today = now.date()
         week_start_date = week_start.date()
         
-        # Пропускаем недели, которые уже начались
-        if week_start_date <= today:
-            logger.debug(f"Пропускаем неделю {week_start.strftime('%Y-%m-%d')} - уже началась")
-            return
+        # НЕ пропускаем текущую неделю - нужно перестраивать расписание для синхронизации с requests
+        # Перестройка выполняется для всех недель, включая текущую
         
         week_str = week_start.strftime('%Y-%m-%d')
         logger.info(f"🔄 Автоматическая перестройка расписаний для недели {week_str}")
@@ -1770,43 +1768,9 @@ async def rebuild_schedules_for_week_async(week_start: datetime, schedule_manage
         default_schedule = schedule_manager.load_default_schedule()
         default_schedule_list = schedule_manager._default_schedule_to_list(default_schedule)
         
-        # Фильтруем заявки: убираем из days_requested те дни, которых не было в default_schedule для сотрудника
-        # Это предотвращает ситуацию, когда сотрудник запрашивает день, которого нет в default_schedule,
-        # а потом делает skip_day, что запускает перестройку и применяет запрос раньше воскресенья
-        filtered_requests = []
-        for req in requests:
-            employee_name = req['employee_name']
-            days_requested = req['days_requested'].copy()
-            days_skipped = req['days_skipped'].copy()
-            
-            # Проверяем, какие дни из days_requested были в default_schedule для этого сотрудника
-            employee_default_days = set()
-            for day_n, places_dict in default_schedule.items():
-                for place_key, name in places_dict.items():
-                    plain_name = schedule_manager.get_plain_name_from_formatted(name)
-                    if plain_name == employee_name:
-                        employee_default_days.add(day_n)
-                        break
-            
-            # Фильтруем days_requested - оставляем только те дни, которые были в default_schedule
-            filtered_days_requested = [day for day in days_requested if day in employee_default_days]
-            
-            # Если были удалены дни из days_requested, логируем
-            if len(filtered_days_requested) < len(days_requested):
-                removed_days = set(days_requested) - set(filtered_days_requested)
-                logger.info(f"Фильтрация заявки для {employee_name}: удалены дни {removed_days} из days_requested (не были в default_schedule)")
-            
-            # Создаем отфильтрованную заявку
-            filtered_req = {
-                'employee_name': employee_name,
-                'telegram_id': req['telegram_id'],
-                'days_requested': filtered_days_requested,
-                'days_skipped': days_skipped
-            }
-            filtered_requests.append(filtered_req)
-        
-        # Используем отфильтрованные заявки
-        requests = filtered_requests
+        # НЕ фильтруем заявки - все запросы должны обрабатываться
+        # build_schedule_from_requests сам решает, добавлять ли сотрудника в расписание или в очередь
+        # в зависимости от количества свободных мест
         
         # Форматируем имена в default_schedule для сравнения
         formatted_default = {}
@@ -1825,21 +1789,23 @@ async def rebuild_schedules_for_week_async(week_start: datetime, schedule_manage
             default_employees = sorted([e.strip() for e in formatted_default.get(day_name, []) if e.strip()])
             
             if schedule_employees != default_employees:
-                schedule_day = schedule.get(day_name, [])
+                schedule_day = schedule.get(day_name, []).copy()  # Копируем, чтобы не изменять оригинал
                 default_day = formatted_default.get(day_name, [])
                 
                 schedule_names = set([e.strip() for e in schedule_day if e.strip()])
                 
-                # Дополняем пустые места из default до полного расписания
+                # Дополняем пустые места из default до MAX_OFFICE_SEATS
+                # НО не ограничиваемся длиной default_day - можем добавить больше, если есть запросы
                 for emp in default_day:
                     emp_stripped = emp.strip()
                     emp_plain = schedule_manager.get_plain_name_from_formatted(emp_stripped)
                     if emp_stripped and emp_stripped not in schedule_names:
                         if emp_plain not in removed_by_skipped.get(day_name, set()):
-                            schedule_day.append(emp)
-                            schedule_names.add(emp_stripped)
-                            if len(schedule_day) >= len(default_day):
-                                break
+                            if len(schedule_day) < MAX_OFFICE_SEATS:  # Проверяем лимит мест
+                                schedule_day.append(emp)
+                                schedule_names.add(emp_stripped)
+                            else:
+                                break  # Достигнут лимит мест
                 
                 changed_days.add(day_name)
                 final_schedule[day_name] = schedule_day
