@@ -51,7 +51,7 @@ class AdminManager:
     """Класс для управления списком администраторов"""
     
     def __init__(self):
-        self.admins: Set[int] = set()  # Начинаем с пустого множества, загрузим из Google Sheets/файла
+        self.admins: Set[int] = set()  # Используется только для fallback, если PostgreSQL недоступен
         
         # Инициализируем Google Sheets Manager если нужно
         self.sheets_manager = None
@@ -61,7 +61,10 @@ class AdminManager:
             except Exception as e:
                 logger.warning(f"Не удалось инициализировать Google Sheets для админов: {e}")
         
-        self._load_admins()
+        # Не загружаем в память при старте - все методы обращаются напрямую к PostgreSQL
+        # Загружаем только для fallback, если PostgreSQL недоступен
+        if not USE_POSTGRESQL:
+            self._load_admins()
     
     def reload_admins(self):
         """Перезагрузить список администраторов из Google Sheets или файла"""
@@ -254,10 +257,34 @@ class AdminManager:
         return True
     
     def is_admin(self, telegram_id: int) -> bool:
-        """Проверить, является ли пользователь администратором"""
+        """Проверить, является ли пользователь администратором (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1 FROM admins WHERE telegram_id = %s", (telegram_id,))
+                        return cur.fetchone() is not None
+            except Exception as e:
+                logger.warning(f"Ошибка проверки админа в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return telegram_id in self.admins
     
     def get_all_admins(self) -> List[int]:
-        """Получить всех администраторов"""
+        """Получить всех администраторов (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT telegram_id FROM admins ORDER BY telegram_id")
+                        return [row[0] for row in cur.fetchall()]
+            except Exception as e:
+                logger.warning(f"Ошибка получения админов в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return sorted(list(self.admins))
 

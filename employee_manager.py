@@ -78,8 +78,11 @@ class EmployeeManager:
             except Exception as e:
                 logger.warning(f"Не удалось инициализировать Google Sheets: {e}")
         
-        self._load_employees()
-        self._load_pending_employees()
+        # Не загружаем в память при старте - все методы обращаются напрямую к PostgreSQL
+        # Загружаем только для fallback, если PostgreSQL недоступен
+        if not USE_POSTGRESQL:
+            self._load_employees()
+            self._load_pending_employees()
     
     def _load_employees(self):
         """Загрузить список сотрудников из PostgreSQL (приоритет), Google Sheets или файла"""
@@ -313,18 +316,61 @@ class EmployeeManager:
         return True
     
     def get_employee_name(self, telegram_id: int) -> Optional[str]:
-        """Получить имя сотрудника по Telegram ID (возвращает имя_вручную)"""
+        """Получить имя сотрудника по Telegram ID (возвращает имя_вручную, обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT manual_name FROM employees WHERE telegram_id = %s", (telegram_id,))
+                        row = cur.fetchone()
+                        if row:
+                            return row[0]
+            except Exception as e:
+                logger.warning(f"Ошибка получения имени сотрудника в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         if telegram_id in self.employees:
             return self.employees[telegram_id][0]
         return None
     
     def get_employee_id(self, name: str) -> Optional[int]:
-        """Получить Telegram ID сотрудника по имени"""
+        """Получить Telegram ID сотрудника по имени (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT telegram_id FROM employees WHERE manual_name = %s LIMIT 1", (name,))
+                        row = cur.fetchone()
+                        if row:
+                            return row[0]
+            except Exception as e:
+                logger.warning(f"Ошибка получения ID сотрудника в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return self.name_to_id.get(name)
     
     def get_telegram_id_by_username(self, username: str) -> Optional[int]:
-        """Получить Telegram ID по username (никнейму в Telegram)"""
+        """Получить Telegram ID по username (никнейму в Telegram, обращается напрямую к PostgreSQL)"""
         username_clean = username.lower().lstrip('@')
+        
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT telegram_id FROM employees WHERE LOWER(username) = %s LIMIT 1", (username_clean,))
+                        row = cur.fetchone()
+                        if row:
+                            return row[0]
+            except Exception as e:
+                logger.warning(f"Ошибка получения ID по username в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         for telegram_id, (_, _, user_username) in self.employees.items():
             if user_username and user_username.lower() == username_clean:
                 return telegram_id
@@ -577,8 +623,23 @@ class EmployeeManager:
         return (was_existing, old_name)
     
     def get_pending_employee(self, username: str) -> Optional[str]:
-        """Получить имя вручную из отложенной записи по username"""
+        """Получить имя вручную из отложенной записи по username (обращается напрямую к PostgreSQL)"""
         username_lower = username.lower().lstrip('@')
+        
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT manual_name FROM pending_employees WHERE LOWER(username) = %s LIMIT 1", (username_lower,))
+                        row = cur.fetchone()
+                        if row:
+                            return row[0]
+            except Exception as e:
+                logger.warning(f"Ошибка получения pending employee в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return self.pending_employees.get(username_lower)
     
     def remove_pending_employee(self, username: str):
@@ -663,52 +724,112 @@ class EmployeeManager:
         return (True, was_added_by_admin)
     
     def get_all_employees(self) -> Dict[str, int]:
-        """Получить всех сотрудников (имя -> telegram_id)"""
+        """Получить всех сотрудников (имя -> telegram_id, обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    result = {}
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT manual_name, telegram_id FROM employees")
+                        for row in cur.fetchall():
+                            result[row[0]] = row[1]
+                    return result
+            except Exception as e:
+                logger.warning(f"Ошибка получения всех сотрудников в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return self.name_to_id.copy()
     
     def get_all_telegram_ids(self) -> List[int]:
-        """Получить все Telegram ID"""
+        """Получить все Telegram ID (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT telegram_id FROM employees")
+                        return [row[0] for row in cur.fetchall()]
+            except Exception as e:
+                logger.warning(f"Ошибка получения всех Telegram ID в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return list(self.employees.keys())
     
     def is_registered(self, telegram_id: int) -> bool:
-        """Проверить, зарегистрирован ли пользователь"""
+        """Проверить, зарегистрирован ли пользователь (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1 FROM employees WHERE telegram_id = %s", (telegram_id,))
+                        return cur.fetchone() is not None
+            except Exception as e:
+                logger.warning(f"Ошибка проверки регистрации в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return telegram_id in self.employees
     
     def was_added_by_admin(self, telegram_id: int) -> bool:
         """
-        Проверить, был ли пользователь добавлен администратором.
-        Если пользователь сам себя зарегистрировал через /start (без pending записи),
-        то manual_name будет равен telegram_name, и это считается "не добавлен админом".
-        Но это не надежно, поэтому лучше проверять через другой механизм.
-        
-        Более надежный способ: если пользователь был в pending или был добавлен до первого /start.
-        Для простоты: если manual_name != telegram_name, значит был добавлен админом.
-        Или если был в pending записи (но она уже удалена после регистрации).
-        
-        Упрощенная логика: если пользователь зарегистрирован, считаем что он был добавлен админом,
-        если только он не сам себя зарегистрировал. Но как это определить?
-        
-        Лучше добавить флаг при регистрации или проверять по другому критерию.
-        Пока используем упрощенную проверку: если есть в employees, значит был добавлен.
+        Проверить, был ли пользователь добавлен администратором (обращается напрямую к PostgreSQL)
         """
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT approved_by_admin FROM employees WHERE telegram_id = %s", (telegram_id,))
+                        row = cur.fetchone()
+                        if row:
+                            return row[0] or False
+            except Exception as e:
+                logger.warning(f"Ошибка проверки approved_by_admin в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         if telegram_id not in self.employees:
             return False
-        
-        # Если пользователь в системе, считаем что он был добавлен админом
-        # (так как мы не сохраняем информацию о том, кто его добавил)
-        # В реальности, если пользователь сам себя зарегистрировал, manual_name == telegram_name
-        # Но это не надежно, так как админ мог добавить с таким же именем
-        
-        # Для более точной проверки можно было бы добавить флаг в данные сотрудника
-        # Но пока используем упрощенную логику: если в системе, значит добавлен
-        return True
+        return self.approved_by_admin.get(telegram_id, False)
     
     def get_employee_data(self, telegram_id: int) -> Optional[Tuple[str, str, Optional[str]]]:
-        """Получить данные сотрудника по Telegram ID (имя_вручную, имя_телеги, никнейм)"""
+        """Получить данные сотрудника по Telegram ID (имя_вручную, имя_телеги, никнейм, обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT manual_name, telegram_name, username FROM employees WHERE telegram_id = %s", (telegram_id,))
+                        row = cur.fetchone()
+                        if row:
+                            return (row[0], row[1] or row[0], row[2])
+            except Exception as e:
+                logger.warning(f"Ошибка получения данных сотрудника в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         return self.employees.get(telegram_id)
     
     def format_employee_name(self, employee_name: str) -> str:
-        """Форматировать имя сотрудника для отображения: имя(@никнейм)"""
+        """Форматировать имя сотрудника для отображения: имя(@никнейм) (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT username FROM employees WHERE manual_name = %s LIMIT 1", (employee_name,))
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            return f"{employee_name}(@{row[0]})"
+            except Exception as e:
+                logger.warning(f"Ошибка форматирования имени в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         telegram_id = self.name_to_id.get(employee_name)
         if telegram_id and telegram_id in self.employees:
             _, _, username = self.employees[telegram_id]
@@ -717,7 +838,24 @@ class EmployeeManager:
         return employee_name
     
     def format_employee_name_by_id(self, telegram_id: int) -> str:
-        """Форматировать имя сотрудника по ID для отображения: имя(@никнейм)"""
+        """Форматировать имя сотрудника по ID для отображения: имя(@никнейм) (обращается напрямую к PostgreSQL)"""
+        if USE_POSTGRESQL:
+            try:
+                from database_sync import _get_connection
+                conn = _get_connection()
+                if conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT manual_name, username FROM employees WHERE telegram_id = %s", (telegram_id,))
+                        row = cur.fetchone()
+                        if row:
+                            manual_name, username = row
+                            if username:
+                                return f"{manual_name}(@{username})"
+                            return manual_name
+            except Exception as e:
+                logger.warning(f"Ошибка форматирования имени по ID в PostgreSQL: {e}")
+        
+        # Fallback на память, если PostgreSQL недоступен
         if telegram_id in self.employees:
             manual_name, _, username = self.employees[telegram_id]
             if username:

@@ -2112,29 +2112,40 @@ async def cmd_admin_reload_from_db(message: Message):
             log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
             return
         
-        # Перезагружаем сотрудников
-        logger.info("Перезагрузка сотрудников из PostgreSQL (команда /admin_reload_from_db)")
-        employee_manager.reload_employees()
-        employee_manager.reload_pending_employees()
-        employees_count = len(employee_manager.employees) if hasattr(employee_manager, 'employees') else 0
+        # Проверяем подключение к PostgreSQL
+        logger.info("Проверка подключения к PostgreSQL (команда /admin_reload_from_db)")
         
-        # Перезагружаем администраторов
-        logger.info("Перезагрузка администраторов из PostgreSQL (команда /admin_reload_from_db)")
-        admin_manager.reload_admins()
-        admins_count = len(admin_manager.admins) if hasattr(admin_manager, 'admins') else 0
-        
-        # Загружаем расписание по умолчанию
-        logger.info("Перезагрузка расписания по умолчанию из PostgreSQL (команда /admin_reload_from_db)")
-        default_schedule = schedule_manager.load_default_schedule()
-        default_schedule_days = len(default_schedule) if default_schedule else 0
+        # Проверяем количество записей в БД
+        try:
+            from database_sync import _get_connection
+            conn = _get_connection()
+            if conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM employees")
+                    employees_count = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM admins")
+                    admins_count = cur.fetchone()[0]
+                    
+                    cur.execute("SELECT COUNT(*) FROM default_schedule")
+                    default_schedule_days = cur.fetchone()[0]
+            else:
+                employees_count = 0
+                admins_count = 0
+                default_schedule_days = 0
+        except Exception as e:
+            logger.error(f"Ошибка проверки данных в PostgreSQL: {e}")
+            employees_count = 0
+            admins_count = 0
+            default_schedule_days = 0
         
         response = (
-            f"✅ Данные успешно перезагружены из PostgreSQL:\n\n"
-            f"👥 Сотрудники: {employees_count} записей\n"
-            f"👑 Администраторы: {admins_count} записей\n"
-            f"📋 Расписание по умолчанию: {default_schedule_days} дней\n\n"
-            f"Все данные в памяти обновлены.\n"
-            f"📅 Schedules и 📝 Requests всегда загружаются напрямую из PostgreSQL при каждом запросе."
+            f"✅ Проверка подключения к PostgreSQL:\n\n"
+            f"👥 Сотрудников в БД: {employees_count} записей\n"
+            f"👑 Администраторов в БД: {admins_count} записей\n"
+            f"📋 Расписание по умолчанию в БД: {default_schedule_days} дней\n\n"
+            f"Все команды обращаются напрямую к PostgreSQL.\n"
+            f"Данные не кэшируются в памяти - каждый запрос идет в БД."
         )
         await message.reply(response)
         log_command(user_info['user_id'], user_info['username'], user_info['first_name'], "/admin_reload_from_db", response)
@@ -2695,24 +2706,19 @@ async def main():
         else:
             logger.info("Загрузка данных из локальных файлов при старте...")
     try:
-        # Перезагружаем данные сотрудников
-        logger.info("📋 Загружаем данные сотрудников из PostgreSQL...")
-        employee_manager.reload_employees()
-        employee_manager.reload_pending_employees()
-        employees_count = len(employee_manager.employees) if hasattr(employee_manager, 'employees') else 0
-        logger.info(f"✅ Сотрудники загружены: {employees_count} записей")
-        
-        # Перезагружаем администраторов
-        logger.info("📋 Загружаем администраторов из PostgreSQL...")
-        admin_manager.reload_admins()
-        admins_count = len(admin_manager.admins) if hasattr(admin_manager, 'admins') else 0
-        logger.info(f"✅ Администраторы загружены: {admins_count} записей")
-        
-        # Загружаем расписание по умолчанию
-        logger.info("📋 Загружаем расписание по умолчанию из PostgreSQL...")
-        default_schedule = schedule_manager.load_default_schedule()
-        default_schedule_days = len(default_schedule) if default_schedule else 0
-        logger.info(f"✅ Расписание по умолчанию загружено: {default_schedule_days} дней")
+        # Не загружаем данные в память при старте - все методы обращаются напрямую к PostgreSQL
+        if use_postgresql:
+            logger.info("✅ Все методы будут обращаться напрямую к PostgreSQL")
+            logger.info("   Данные не загружаются в память - каждый запрос идет в БД")
+        else:
+            # Если PostgreSQL недоступен, загружаем в память для fallback
+            logger.info("⚠️ PostgreSQL недоступен, загружаем данные в память для fallback...")
+            employee_manager.reload_employees()
+            employee_manager.reload_pending_employees()
+            admin_manager.reload_admins()
+            employees_count = len(employee_manager.employees) if hasattr(employee_manager, 'employees') else 0
+            admins_count = len(admin_manager.admins) if hasattr(admin_manager, 'admins') else 0
+            logger.info(f"✅ Загружено для fallback: {employees_count} сотрудников, {admins_count} админов")
         
         # Предзагружаем расписания для текущей и следующей недели
         # Это гарантирует, что данные будут доступны при первом вызове команд
