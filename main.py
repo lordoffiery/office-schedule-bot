@@ -256,7 +256,7 @@ def format_schedule_with_places(schedule: dict, default_schedule: dict = None) -
             # (например, они запросили день через days_requested)
             for i, (place, emp) in enumerate(employees_with_places):
                 if place is None:
-                    # Ищем свободное место (1.1, 1.2, ..., 1.8)
+                    # Ищем свободное место (1.1 … 1.N, N = MAX_OFFICE_SEATS)
                     from config import MAX_OFFICE_SEATS
                     for place_num in range(1, MAX_OFFICE_SEATS + 1):
                         candidate_place = f"1.{place_num}"
