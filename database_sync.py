@@ -188,9 +188,10 @@ def load_requests_from_db_sync(week_start_str: str) -> List[Dict]:
         week_start_date = datetime.strptime(week_start_str, "%Y-%m-%d").date()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT employee_name, telegram_id, days_requested, days_skipped
+                SELECT employee_name, telegram_id, days_requested, days_skipped, created_at
                 FROM requests
                 WHERE week_start = %s
+                ORDER BY created_at ASC NULLS LAST, employee_name ASC
             """, (week_start_date,))
             
             rows = cur.fetchall()
@@ -202,7 +203,8 @@ def load_requests_from_db_sync(week_start_str: str) -> List[Dict]:
                     'employee_name': row['employee_name'],
                     'telegram_id': row['telegram_id'],
                     'days_requested': days_requested,
-                    'days_skipped': days_skipped
+                    'days_skipped': days_skipped,
+                    'created_at': row.get('created_at'),
                 })
             return result
     except Exception as e:

@@ -5,7 +5,7 @@ import os
 import json
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as date_type
 from typing import Dict, List, Optional, Tuple
 from config import (
     SCHEDULES_DIR, REQUESTS_DIR, QUEUE_DIR, DEFAULT_SCHEDULE_FILE, 
@@ -20,6 +20,23 @@ from utils import get_header_start_idx, filter_empty_rows, ensure_header
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
+
+
+def _merge_request_created_at(a, b):
+    """Ранний created_at при слиянии заявок одного сотрудника (например, из разных источников)."""
+    if a is not None and b is not None:
+        return min(a, b)
+    return a if a is not None else b
+
+
+def _request_sort_key_for_week(req: Dict) -> tuple:
+    """Сортировка заявок: раньше created_at — раньше обрабатываются (в т.ч. при конкуренции за место)."""
+    ca = req.get('created_at')
+    if ca is None:
+        return (datetime.max, req.get('employee_name') or '')
+    if isinstance(ca, date_type) and not isinstance(ca, datetime):
+        ca = datetime.combine(ca, datetime.min.time())
+    return (ca, req.get('employee_name') or '')
 
 # Импортируем Google Sheets Manager только если нужно
 if USE_GOOGLE_SHEETS:
@@ -1136,13 +1153,19 @@ class ScheduleManager:
                                 'employee_name': req['employee_name'],
                                 'telegram_id': req['telegram_id'],
                                 'days_requested': combined_requested,
-                                'days_skipped': combined_skipped
+                                'days_skipped': combined_skipped,
+                                'created_at': _merge_request_created_at(
+                                    existing.get('created_at'), req.get('created_at')
+                                ),
                             }
                         else:
                             requests_dict[key] = req
                     
                     if requests_dict:
-                        result = list(requests_dict.values())
+                        result = sorted(
+                            requests_dict.values(),
+                            key=_request_sort_key_for_week,
+                        )
                         logger.debug(f"Заявки для недели {week_str} загружены из PostgreSQL: {len(result)} записей")
                         return result
             except Exception as e:
@@ -1177,21 +1200,23 @@ class ScheduleManager:
                                         'employee_name': employee_name,
                                         'telegram_id': telegram_id,
                                         'days_requested': combined_requested,
-                                        'days_skipped': combined_skipped
+                                        'days_skipped': combined_skipped,
+                                        'created_at': existing.get('created_at'),
                                     }
                                 else:
                                     requests_dict[key] = {
                                         'employee_name': employee_name,
                                         'telegram_id': telegram_id,
                                         'days_requested': days_requested,
-                                        'days_skipped': days_skipped
+                                        'days_skipped': days_skipped,
+                                        'created_at': None,
                                     }
                         except (ValueError, IndexError):
                             continue
             except Exception as e:
                 logger.warning(f"Ошибка загрузки заявок из Google Sheets: {e}")
         
-        return list(requests_dict.values())
+        return sorted(requests_dict.values(), key=_request_sort_key_for_week)
     
     def clear_requests_for_week(self, week_start: datetime):
         """Очистить заявки на неделю (после формирования расписания) в PostgreSQL, Google Sheets и файл"""
